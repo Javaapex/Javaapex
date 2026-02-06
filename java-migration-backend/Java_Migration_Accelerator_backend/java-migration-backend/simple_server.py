@@ -8,7 +8,7 @@ import urllib.parse
 
 class MockHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.startswith('/api/github/analyze-url'):
+        if self.path.startswith('api/github/analyze-url'):
             # Parse the query parameters
             parsed_path = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_path.query)
@@ -55,7 +55,7 @@ class MockHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(response).encode())
-        elif self.path.startswith('/api/github/list-files'):
+        elif self.path.startswith('api/github/list-files'):
             # Mock file listing response with comprehensive file structure
             parsed_path = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_path.query)

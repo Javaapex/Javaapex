@@ -56,6 +56,7 @@ const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <header style={shellStyles.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src={apexLogo} alt="Apex Logo" style={{ height: 40, width: "auto" }} />
+          <span style={{ fontWeight: 900, color: "#1e293b", fontSize: 20 }}> Full Migration</span>
         </div>
         <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span 

@@ -543,7 +543,7 @@ class MockHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(response).encode())
-        elif self.path == '/api/conversion-types':
+        elif self.path == 'api/conversion-types':
             response = [
                 {
                     "id": "java_version",

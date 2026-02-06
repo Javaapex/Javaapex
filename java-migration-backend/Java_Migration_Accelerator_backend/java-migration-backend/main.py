@@ -1437,7 +1437,7 @@ async def get_available_recipes():
     return migration_service.get_available_recipes()
 
 
-@app.get("api/conversion-types")
+@app.get("/api/conversion-types")
 async def get_conversion_types():
     """Get available conversion types for migration"""
     return [

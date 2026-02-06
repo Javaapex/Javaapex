@@ -1,8 +1,8 @@
 /**
  * API Service for Java Migration Backend
  */
-
-export const API_BASE_URL = (import.meta.env?.VITE_API_URL || 'https://javaapex-6ou8.onrender.com') + '/api';
+export const API_BASE_URL = (import.meta.env?.VITE_API_URL || 'https://javaapex-6ou8.onrender.com')
+        .replace(/\/+$/, '') + '/api';
 
 export interface RepoInfo {
   name: string;

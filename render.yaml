@@ -1,0 +1,22 @@
+services:
+  # Backend + Frontend combined (Dockerfile builds both)
+  - type: web
+    name: java-migration-app
+    runtime: python
+    buildCommand: pip install -r java-migration-backend/Java_Migration_Accelerator_backend/java-migration-backend/requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: java-migration-backend/Java_Migration_Accelerator_backend/java-migration-backend
+    dockerfilePath: ../Dockerfile
+    envVars:
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITLAB_TOKEN
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SONARQUBE_TOKEN
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

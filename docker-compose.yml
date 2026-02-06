@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8001:8001"
+    environment:
+      - WORK_DIR=/tmp/migrations
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./java-migration-backend:/app:delegated
+
+  frontend:
+    build:
+      context: ./java-migration-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+networks:
+  default:
+    name: java-migration-net

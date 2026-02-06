@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Java Migration Accelerator – Executive Presentation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Roboto', Arial, sans-serif;
+      background: #0f172a;
+      color: #e5eaf5;
+      margin: 0;
+      overflow: hidden;
+    }
+    .slide {
+      width: 100vw; height: 100vh;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 60px; box-sizing: border-box;
+      opacity: 0; transition: opacity 0.6s ease;
+      position: absolute; top: 0; left: 0;
+      background: linear-gradient(135deg,#0f172a,#111827);
+    }
+    .slide.active { opacity: 1; z-index: 2; }
+
+    .title {
+      font-family: 'Montserrat';
+      font-size: 3.2em;
+      color: #60a5fa;
+      margin-bottom: 0.3em;
+    }
+    .subtitle {
+      font-size: 1.5em;
+      color: #c7d2fe;
+      margin-bottom: 1.5em;
+    }
+    .section {
+      font-family: 'Montserrat';
+      font-size: 2.2em;
+      color: #facc15;
+      margin-bottom: 0.6em;
+    }
+    ul {
+      font-size: 1.25em;
+      line-height: 1.8;
+      max-width: 900px;
+    }
+    .diagram {
+      background: #020617;
+      border: 2px solid #334155;
+      padding: 25px;
+      border-radius: 14px;
+      margin-top: 20px;
+      box-shadow: 0 0 40px rgba(0,0,0,0.6);
+    }
+    .footer {
+      position: absolute; bottom: 25px; left: 0; width: 100%; text-align: center;
+      color: #94a3b8; font-size: 1em;
+    }
+    .nav {
+      position: fixed; bottom: 30px; right: 40px; z-index: 10;
+    }
+    .nav button {
+      font-size: 1.1em; margin: 0 6px; padding: 10px 22px;
+      border: none; border-radius: 6px;
+      background: linear-gradient(90deg,#2563eb,#3b82f6);
+      color: #fff; cursor: pointer; font-weight: 600;
+    }
+    .nav button:disabled { background: #334155; color: #94a3b8; }
+
+    pre {
+      background: #020617;
+      color: #facc15;
+      padding: 18px;
+      border-radius: 10px;
+      font-size: 1.05em;
+      box-shadow: inset 0 0 20px #000;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-top: 30px;
+      width: 90%;
+    }
+    .card {
+      background: #020617;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      text-align: center;
+      color: #60a5fa;
+      font-size: 1.2em;
+    }
+    .panel {
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 30px;
+      width: 80%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="slides">
+
+  <!-- Title Slide -->
+  <div class="slide active">
+    <div class="title">Java Migration Accelerator</div>
+    <div class="subtitle">Automated Java 7–21 Migration Platform</div>
+    <div style="font-size:1.3em; color:#cbd5f5;">Enterprise‑grade modernization for legacy Java systems</div>
+    <div class="footer">Pulimurugan Thangaraman | Confidential Executive Presentation</div>
+  </div>
+
+  <!-- What is -->
+  <div class="slide">
+    <div class="section">What is Java Migration Accelerator?</div>
+    <ul>
+      <li>Enterprise automation platform for upgrading legacy Java applications to modern standards.</li>
+      <li>Handles Java versions, framework migrations, and business logic modernization in one workflow.</li>
+      <li>Reduces technical debt, improves security, and accelerates digital transformation.</li>
+      <li>Seamlessly integrates with CI/CD and developer toolchains.</li>
+    </ul>
+  </div>
+
+  <!-- How It Works -->
+  <div class="slide">
+    <div class="section">How Does It Work?</div>
+    <ul>
+      <li>Select repository and target Java / frameworks.</li>
+      <li>Automatic code analysis and migration planning.</li>
+      <li>OpenRewrite recipes refactor and modernize the codebase.</li>
+      <li>Automated tests and quality gates validate the migration.</li>
+      <li>Migrated code, reports, and notifications are delivered automatically.</li>
+    </ul>
+  </div>
+
+  <!-- Migration Pipeline -->
+  <div class="slide">
+    <div class="section">Migration Pipeline</div>
+    <ul>
+      <li><b>Step 1:</b> Repository analysis & environment setup</li>
+      <li><b>Step 2:</b> Java upgrades (7 → 8 → 11 → 17 → 21)</li>
+      <li><b>Step 3:</b> Framework migrations (Spring Boot, Jakarta, JUnit)</li>
+      <li><b>Step 4:</b> Business logic & performance improvements</li>
+      <li><b>Step 5:</b> Testing & quality gates</li>
+      <li><b>Step 6:</b> Reporting & delivery</li>
+    </ul>
+  </div>
+
+  <!-- CI/CD Pipeline Diagram -->
+  <div class="slide">
+    <div class="section">CI/CD Migration Pipeline</div>
+    <div class="diagram">
+      Git Repo → CI Build → OpenRewrite → Unit Tests → SonarQube → Package → Deploy
+    </div>
+  </div>
+
+  <!-- OpenRewrite Pipeline -->
+  <div class="slide">
+    <div class="section">Java Modernization Pipeline</div>
+    <div class="diagram">
+      Analyze → Upgrade Java → Migrate Frameworks → Refactor Code → Validate → Report
+    </div>
+  </div>
+
+  <!-- Executive Dashboard -->
+  <div class="slide">
+    <div class="section">Migration Dashboard (Executive View)</div>
+    <div class="dashboard">
+      <div class="card">Active Jobs<br><b>12</b></div>
+      <div class="card">Completed<br><b>128</b></div>
+      <div class="card">Failures<br><b>2</b></div>
+      <div class="card">Quality Score<br><b>94%</b></div>
+    </div>
+    <div class="panel">Migration Progress: Java 7 → 21<br>███████████████ 88% Complete</div>
+  </div>
+
+  <!-- Sample API -->
+  <div class="slide">
+    <div class="section">Sample Migration API Payload</div>
+    <pre>{
+  "platform": "github",
+  "source_repo_url": "https://github.com/org/legacy-app",
+  "target_repo_name": "legacy-app-java21",
+  "source_java_version": "8",
+  "target_java_version": "21",
+  "frameworks": ["spring-boot", "junit"],
+  "fix_business_logic": true
+}</pre>
+  </div>
+
+  <!-- Value Proposition -->
+  <div class="slide">
+    <div class="section">Business Value</div>
+    <ul>
+      <li>70% faster modernization compared to manual migration</li>
+      <li>Lower risk with automated refactoring and validation</li>
+      <li>Improved security, maintainability, and compliance</li>
+      <li>Future‑ready Java platforms for long‑term scalability</li>
+    </ul>
+  </div>
+
+  <!-- Closing -->
+  <div class="slide">
+    <div class="section">Thank You</div>
+    <ul>
+      <li>Email: support@java-migration-accelerator.com</li>
+      <li>Documentation & Product Demos available on request</li>
+    </ul>
+    <div class="footer">Java Migration Accelerator – Executive Overview</div>
+  </div>
+
+</div>
+
+<div class="nav">
+  <button id="prev">Previous</button>
+  <button id="next">Next</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+  function showSlide(i) {
+    slides.forEach(s => s.classList.remove('active'));
+    slides[i].classList.add('active');
+    document.getElementById('prev').disabled = i === 0;
+    document.getElementById('next').disabled = i === slides.length - 1;
+  }
+  document.getElementById('prev').onclick = () => { if (current > 0) showSlide(--current); };
+  document.getElementById('next').onclick = () => { if (current < slides.length - 1) showSlide(++current); };
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') document.getElementById('next').click();
+    if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+  });
+</script>
+
+</body>
+</html>

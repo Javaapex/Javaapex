@@ -10,3 +10,4 @@ jinja2==3.1.2
 python-multipart==0.0.6
 aiofiles==23.2.1
 requests==2.31.0
+gunicorn==21.2.0

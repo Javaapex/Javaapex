@@ -1,6 +1,13 @@
 """
-AI Service - FordLLM Integration for Java Migration
-Provides AI-powered code analysis, business logic review, and automated fixes
+AI Service - Multi-Provider LLM Integration for Java Migration
+Provides AI-powered code analysis using Groq, OpenAI, Hugging Face, or other providers
+
+Architecture:
+- Multi-level fallback chain
+- Token tracking and usage monitoring
+- Provider abstraction layer
+- Enterprise error handling
+- Async-first design
 """
 import os
 import json
@@ -12,7 +19,6 @@ from datetime import datetime
 import httpx
 import requests
 from dotenv import load_dotenv
-from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +36,7 @@ class AIAnalysisResult:
     confidence_score: float
     processing_time: float
     raw_response: str
+    tokens: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -42,227 +49,313 @@ class AIFixResult:
     fix_description: str
     confidence_score: float
     issues_resolved: List[str]
+    tokens: Optional[Dict[str, int]] = None
 
 
 
-class FordLLMAPI:
-    """FordLLM API client using OpenAI-compatible interface"""
+class AIProviderFactory:
+    """
+    Factory for creating LLM provider instances with fallback chain support
+    Implements enterprise-grade error handling and provider abstraction
+    """
     
-    def __init__(self):
-        from services.fordllm_auth_service import fordllm_auth
-        self._auth = fordllm_auth
-        self.base_url = os.getenv("FORDLLM_BASE_URL", "https://api.pivpn.core.ford.com/fordllmapi/api/v1")
-        self.model = os.getenv("FORDLLM_MODEL", "fordllm-coding-model")
-        self.sub_model = os.getenv("FORDLLM_SUB_MODEL", "gemini-2.5-pro")
+    # Cache provider instances to avoid repeated initialization
+    _provider_cache = {}
+    
+    @classmethod
+    def get_provider(cls, provider_name: str = "groq") -> Optional[Any]:
+        """
+        Get an LLM provider instance by name
+        Returns None if provider not available
+        """
+        provider_name = (provider_name or "groq").lower()
+        
+        # Check cache first
+        if provider_name in cls._provider_cache:
+            return cls._provider_cache[provider_name]
+        
+        provider = None
+        
+        if provider_name == "groq":
+            try:
+                from services.groq_service import groq_service
+                if groq_service.check_availability():
+                    provider = groq_service
+                    logger.debug("✓ Groq provider available")
+            except Exception as e:
+                logger.debug(f"Groq service not available: {e}")
+        
+        elif provider_name == "openai":
+            try:
+                from openai import OpenAI
+                api_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if api_key:
+                    provider = OpenAI(api_key=api_key)
+                    logger.debug("✓ OpenAI provider available")
+            except Exception as e:
+                logger.debug(f"OpenAI provider not available: {e}")
+        
+        elif provider_name == "huggingface":
+            try:
+                from services.ai_service_huggingface import huggingface_ai_service
+                if huggingface_ai_service:
+                    provider = huggingface_ai_service
+                    logger.debug("✓ HuggingFace provider available")
+            except Exception as e:
+                logger.debug(f"HuggingFace service not available: {e}")
+        
+        # Cache the result (even if None)
+        cls._provider_cache[provider_name] = provider
+        return provider
+    
+    @classmethod
+    def get_available_providers(cls) -> List[str]:
+        """Get list of available providers"""
+        available = []
+        for provider_name in ["groq", "openai", "huggingface"]:
+            if cls.get_provider(provider_name) is not None:
+                available.append(provider_name)
+        return available
+    
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear provider cache (useful for testing)"""
+        cls._provider_cache.clear()
 
-        # Set Ford proxy
-        os.environ.setdefault("HTTP_PROXY", "http://internet.ford.com:83")
-        os.environ.setdefault("HTTPS_PROXY", "http://internet.ford.com:83")
 
-        logger.info("FordLLM API client initialized (base_url=%s, model=%s)", self.base_url, self.model)
-
-    def _get_client(self) -> OpenAI:
-        """Return an OpenAI client with a fresh token."""
-        return OpenAI(
-            api_key=self._auth.token,
-            base_url=self.base_url,
+class LLMAnalysisService:
+    """
+    Generic LLM analysis service supporting multiple providers with fallback
+    
+    Features:
+    - Multi-level fallback chain
+    - Token tracking
+    - Enterprise error handling
+    - Provider abstraction
+    """
+    
+    def __init__(self, provider_name: str = "groq", enable_fallback: bool = True):
+        """
+        Initialize with specified provider
+        
+        Args:
+            provider_name: Primary provider (groq, openai, huggingface)
+            enable_fallback: Enable automatic fallback to other providers
+        """
+        self.primary_provider_name = (provider_name or "groq").lower()
+        self.primary_provider = AIProviderFactory.get_provider(self.primary_provider_name)
+        self.enable_fallback = enable_fallback
+        self.current_provider_name = self.primary_provider_name
+        self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        
+        if not self.primary_provider and enable_fallback:
+            logger.warning(
+                f"Primary provider '{self.primary_provider_name}' not available, "
+                "fallback enabled"
+            )
+        
+        logger.info(
+            f"LLM Analysis Service initialized with provider: {self.primary_provider_name}"
         )
     
     async def generate_text(
-        self, 
-        model: str, 
-        prompt: str, 
-        max_tokens: int = 1000,
+        self,
+        prompt: str,
+        max_tokens: int = 2048,
         temperature: float = 0.7,
-        top_p: float = 0.9
+        system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate text using FordLLM via OpenAI-compatible API"""
+        """
+        Generate text using configured provider with fallback chain
+        
+        Fallback Chain:
+        1. Try primary provider
+        2. If failed and fallback enabled, try alternative providers
+        3. If all fail, return graceful fallback response
+        """
+        # Try primary provider first
+        if self.primary_provider:
+            result = await self._call_provider(
+                self.primary_provider,
+                self.primary_provider_name,
+                prompt,
+                max_tokens,
+                temperature,
+                system_prompt
+            )
+            if result.get("success"):
+                self.current_provider_name = self.primary_provider_name
+                return result
+        
+        # If primary failed and fallback enabled, try alternatives
+        if self.enable_fallback and not self.primary_provider:
+            available = AIProviderFactory.get_available_providers()
+            available = [p for p in available if p != self.primary_provider_name]
+            
+            for alt_provider_name in available:
+                logger.debug(f"Trying fallback provider: {alt_provider_name}")
+                alt_provider = AIProviderFactory.get_provider(alt_provider_name)
+                
+                if alt_provider:
+                    result = await self._call_provider(
+                        alt_provider,
+                        alt_provider_name,
+                        prompt,
+                        max_tokens,
+                        temperature,
+                        system_prompt
+                    )
+                    if result.get("success"):
+                        self.current_provider_name = alt_provider_name
+                        logger.info(f"Successfully used fallback provider: {alt_provider_name}")
+                        return result
+        
+        # All providers failed, return graceful fallback
+        logger.warning("All LLM providers failed, returning fallback response")
+        return self._fallback_response(prompt)
+    
+    async def _call_provider(
+        self,
+        provider: Any,
+        provider_name: str,
+        prompt: str,
+        max_tokens: int,
+        temperature: float,
+        system_prompt: Optional[str],
+    ) -> Dict[str, Any]:
+        """Internal method to call a specific provider with error handling"""
         try:
-            client = self._get_client()
-
-            messages = [
-                {"role": "system", "content": "You are an expert Java code analyst. Always respond with valid JSON when asked."},
-                {"role": "user", "content": prompt},
-            ]
-
-            # Run the synchronous OpenAI call in a thread to keep async flow
+            if provider_name == "groq":
+                return await provider.generate_text(
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system_prompt=system_prompt or "You are an expert Java code analyst."
+                )
+            elif provider_name == "openai":
+                return await self._call_openai_provider(
+                    provider, prompt, max_tokens, temperature, system_prompt
+                )
+            elif provider_name == "huggingface":
+                return await provider.analyze_code(
+                    prompt=prompt, analysis_type="general"
+                )
+        except Exception as e:
+            logger.warning(f"Provider '{provider_name}' call failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _call_openai_provider(
+        self, provider: Any, prompt: str, max_tokens: int, temperature: float,
+        system_prompt: Optional[str]
+    ) -> Dict[str, Any]:
+        """Call OpenAI provider with async support"""
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             completion = await loop.run_in_executor(
                 None,
-                lambda: client.chat.completions.create(
-                    model=self.model,
+                lambda: provider.chat.completions.create(
+                    model=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    top_p=top_p,
-                    extra_body={"models": [self.sub_model]},
                 ),
             )
-
-            generated = completion.choices[0].message.content or ""
+            
+            tokens = {
+                "prompt_tokens": completion.usage.prompt_tokens,
+                "completion_tokens": completion.usage.completion_tokens,
+                "total_tokens": completion.usage.total_tokens,
+            }
+            self.token_usage = {
+                k: self.token_usage.get(k, 0) + v for k, v in tokens.items()
+            }
+            
             return {
                 "success": True,
-                "generated_text": generated,
-                "model": f"fordllm/{self.sub_model}",
+                "generated_text": completion.choices[0].message.content,
+                "model": completion.model,
+                "status_code": 200,
+                "tokens": tokens,
+            }
+        except Exception as e:
+            logger.error(f"OpenAI call failed: {e}")
+            return {"success": False, "error": str(e)}
+                "model": completion.model,
                 "status_code": 200,
             }
-
         except Exception as e:
-            if "401" in str(e) or "unauthorized" in str(e).lower():
-                # Token may have expired mid-request – force refresh and retry once
-                logger.warning("FordLLM 401 – refreshing token and retrying …")
-                try:
-                    self._auth.refresh_token()
-                    client = self._get_client()
-                    completion = await loop.run_in_executor(
-                        None,
-                        lambda: client.chat.completions.create(
-                            model=self.model,
-                            messages=messages,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                            top_p=top_p,
-                            extra_body={"models": [self.sub_model]},
-                        ),
-                    )
-                    generated = completion.choices[0].message.content or ""
-                    return {
-                        "success": True,
-                        "generated_text": generated,
-                        "model": f"fordllm/{self.sub_model}",
-                        "status_code": 200,
-                    }
-                except Exception as retry_exc:
-                    logger.error("FordLLM retry also failed: %s", retry_exc)
-                    return self._generate_fallback_response(prompt, model)
-
-            logger.error("Error calling FordLLM API: %s", e)
-            return self._generate_fallback_response(prompt, model)
+            logger.error(f"OpenAI call failed: {e}")
+            return self._fallback_response(prompt)
     
-    def _generate_fallback_response(self, prompt: str, model: str) -> Dict[str, Any]:
-        """Generate fallback response when FordLLM API is not available"""
-        logger.info(f"Using fallback response for model {model}")
+    def _fallback_response(self, prompt: str) -> Dict[str, Any]:
+        """Generate graceful fallback response when all providers unavailable"""
+        logger.warning("All LLM providers unavailable, returning fallback response")
         
-        # Simple keyword-based analysis for fallback
-        if "business logic" in prompt.lower():
-            fallback_text = """
-{
-  "issues": [
-    {
-      "type": "business_logic",
-      "severity": "medium",
-      "category": "logic_error",
-      "description": "Potential business logic issue detected",
-      "line_number": 1,
-      "code_snippet": "Sample code snippet"
-    }
-  ],
-  "recommendations": [
-    "Review business rule implementations",
-    "Add proper validation",
-    "Consider edge cases"
-  ],
-  "confidence_score": 0.6
-}
-"""
-        elif "code quality" in prompt.lower():
-            fallback_text = """
-{
-  "issues": [
-    {
-      "type": "code_quality",
-      "severity": "low",
-      "category": "code_smell",
-      "description": "Code quality issue detected",
-      "line_number": 1,
-      "code_snippet": "Sample code snippet"
-    }
-  ],
-  "recommendations": [
-    "Improve code maintainability",
-    "Follow best practices",
-    "Add proper documentation"
-  ],
-  "confidence_score": 0.5
-}
-"""
-        elif "dependencies" in prompt.lower():
-            fallback_text = """
-{
-  "issues": [
-    {
-      "type": "dependencies",
-      "severity": "medium",
-      "category": "version_compatibility",
-      "description": "Dependency compatibility issue",
-      "line_number": 1,
-      "code_snippet": "Sample dependency"
-    }
-  ],
-  "recommendations": [
-    "Update to compatible versions",
-    "Check Java version compatibility",
-    "Review security vulnerabilities"
-  ],
-  "confidence_score": 0.7
-}
-"""
-        else:
-            fallback_text = """
-{
+        fallback_text = """{
   "issues": [],
   "recommendations": [
-    "Analysis completed successfully",
-    "No critical issues detected",
-    "Consider manual review for complex scenarios"
+    "LLM provider is not available or not configured",
+    "Please configure environment variables for your chosen LLM provider",
+    "Supported providers: groq (free), openai (paid), huggingface (free limited), ollama (local)"
   ],
-  "confidence_score": 0.8
-}
-"""
+  "confidence_score": 0.0
+}"""
         
         return {
-            "success": True,
+            "success": False,
             "generated_text": fallback_text,
-            "model": f"{model}_fallback",
-            "status_code": 200
+            "model": "fallback",
+            "status_code": 503,
+            "tokens": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "error": "No LLM provider available",
         }
     
-    def check_model_availability(self, model: str) -> bool:
-        """Check if FordLLM is available by verifying we have a token."""
-        try:
-            _ = self._auth.token
-            return True
-        except Exception:
-            return False
+    def get_current_provider(self) -> str:
+        """Get the currently active provider"""
+        return self.current_provider_name
+    
+    def get_token_usage(self) -> Dict[str, int]:
+        """Get cumulative token usage for this service"""
+        return self.token_usage.copy()
 
 
 class AIAnalysisService:
-    """AI-powered analysis service for Java migration"""
+    """
+    AI-powered analysis service for Java migration
+    Supports multiple LLM providers with token tracking and error recovery
+    """
     
-    def __init__(self):
-        self.hf_api = FordLLMAPI()
+    def __init__(self, provider: str = "groq", enable_fallback: bool = True):
+        """
+        Initialize with specified LLM provider
         
-        # Configure models – FordLLM uses a single model endpoint
-        self.models = {
-            "business_logic": "fordllm-coding-model",
-            "code_quality": "fordllm-coding-model",
-            "dependency_analysis": "fordllm-coding-model",
-            "automated_fixes": "fordllm-coding-model",
-            "general_analysis": "fordllm-coding-model"
-        }
-        
-        # Check FordLLM availability
-        self.available_models = {}
-        fordllm_available = self.hf_api.check_model_availability("fordllm")
-        for analysis_type in self.models:
-            self.available_models[analysis_type] = fordllm_available
-        if fordllm_available:
-            logger.info("FordLLM is available for all analysis types.")
-        else:
-            logger.warning("FordLLM is NOT available – fallback responses will be used.")
+        Args:
+            provider: Provider name (groq, openai, huggingface, ollama)
+            enable_fallback: Enable fallback to alternative providers
+        """
+        self.provider_name = (provider or "groq").lower()
+        self.llm_service = LLMAnalysisService(
+            provider_name=self.provider_name,
+            enable_fallback=enable_fallback
+        )
+        self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    
+    def _update_token_usage(self, response: Dict[str, Any]) -> None:
+        """Track token usage from response"""
+        if isinstance(response, dict) and "tokens" in response:
+            tokens = response.get("tokens", {})
+            self.token_usage["prompt_tokens"] += tokens.get("prompt_tokens", 0)
+            self.token_usage["completion_tokens"] += tokens.get("completion_tokens", 0)
+            self.token_usage["total_tokens"] += tokens.get("total_tokens", 0)
     
     async def analyze_business_logic(self, code_content: str, file_path: str = "") -> AIAnalysisResult:
-        """AI-powered business logic analysis"""
+        """AI-powered business logic analysis with token tracking"""
         start_time = datetime.now()
         
         prompt = f"""
@@ -310,48 +403,54 @@ class AIAnalysisService:
         Focus on actionable issues that need attention during Java migration.
         """
         
-        model = self.models["business_logic"]
-        if not self.available_models["business_logic"]:
-            model = self.models["general_analysis"]
+        result = await self.llm_service.generate_text(
+            prompt=prompt,
+            max_tokens=1500,
+            temperature=0.3,
+            system_prompt="You are an expert Java code analyst. Always respond with valid JSON."
+        )
         
-        result = await self.hf_api.generate_text(model, prompt, max_tokens=1500, temperature=0.3)
-        
+        # Track token usage
+        self._update_token_usage(result)
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        if result["success"]:
+        if result.get("success", False):
             try:
                 # Parse JSON response
-                analysis_data = json.loads(result["generated_text"])
+                analysis_data = json.loads(result.get("generated_text", "{}"))
                 
                 return AIAnalysisResult(
-                    model_used=model,
+                    model_used=result.get("model", self.provider_name),
                     analysis_type="business_logic",
                     issues_found=analysis_data.get("issues", []),
                     recommendations=analysis_data.get("recommendations", []),
                     confidence_score=analysis_data.get("confidence_score", 0.8),
                     processing_time=processing_time,
-                    raw_response=result["generated_text"]
+                    raw_response=result.get("generated_text", ""),
+                    tokens=result.get("tokens", {})
                 )
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse JSON response from business logic analysis")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Failed to parse JSON response: {e}")
                 return AIAnalysisResult(
-                    model_used=model,
+                    model_used=result.get("model", self.provider_name),
                     analysis_type="business_logic",
                     issues_found=[],
                     recommendations=["Unable to parse detailed analysis"],
                     confidence_score=0.0,
                     processing_time=processing_time,
-                    raw_response=result["generated_text"]
+                    raw_response=result.get("generated_text", ""),
+                    tokens=result.get("tokens", {})
                 )
         else:
             return AIAnalysisResult(
-                model_used=model,
+                model_used=result.get("model", self.provider_name),
                 analysis_type="business_logic",
                 issues_found=[],
                 recommendations=[f"Analysis failed: {result.get('error', 'Unknown error')}"],
                 confidence_score=0.0,
                 processing_time=processing_time,
-                raw_response=""
+                raw_response="",
+                tokens=result.get("tokens", {})
             )
     
     async def analyze_code_quality(self, project_path: str) -> AIAnalysisResult:

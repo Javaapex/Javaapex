@@ -354,7 +354,7 @@ class MigrationRequest(BaseModel):
     email: Optional[str] = Field(default=None, description="Email for migration summary")
     run_tests: bool = Field(default=True, description="Run tests after migration")
     use_llm_tests: bool = Field(default=True, description="Use an LLM to generate tests and a test plan")
-    llm_test_provider: str = Field(default="fordllm", description="LLM provider (fordllm | openai | groq | deepseek | huggingface | ollama | offline)")
+    llm_test_provider: str = Field(default="groq", description="LLM provider (groq | openai | deepseek | huggingface | ollama | offline)")
     run_sonar: bool = Field(default=True, description="Run SonarQube analysis")
     run_fossa: bool = Field(default=False, description="Run FOSSA license and dependency scan")
     fix_business_logic: bool = Field(default=True, description="Attempt to fix business logic issues")
@@ -2246,7 +2246,7 @@ async def get_migration_logs(job_id: str):
 @app.post("/api/migration/{job_id}/rerun-tests")
 async def rerun_migration_tests(
     job_id: str,
-    llm_provider: str = "fordllm",
+    llm_provider: str = "groq",
     use_llm_tests: bool = True,
 ):
     """Re-run tests for an existing migration job and update its test metrics."""
@@ -8220,7 +8220,7 @@ async def run_migration(job_id: str, request: MigrationRequest):
   # Step 4: Run tests
         if request.run_tests:
             update_job(job_id, MigrationStatus.TESTING, 60, "Running tests and validating APIs...")
-            llm_provider = request.llm_test_provider or "fordllm"
+            llm_provider = request.llm_test_provider or "groq"
             use_llm_tests = getattr(request, "use_llm_tests", True)
             test_result = await migration_service.run_tests(
                     clone_path,

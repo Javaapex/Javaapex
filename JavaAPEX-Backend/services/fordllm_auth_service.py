@@ -44,9 +44,10 @@ class FordLLMAuthService:
         self._refresh_timer: Optional[threading.Timer] = None
         self._token_lock = threading.Lock()
 
-        # Ford proxy – required on the corporate network
-        os.environ.setdefault("HTTP_PROXY", "http://internet.ford.com:83")
-        os.environ.setdefault("HTTPS_PROXY", "http://internet.ford.com:83")
+        # Ford proxy – required on the corporate network, but NOT on cloud deployment
+        if not os.environ.get("RENDER"):
+            os.environ.setdefault("HTTP_PROXY", "http://internet.ford.com:83")
+            os.environ.setdefault("HTTPS_PROXY", "http://internet.ford.com:83")
 
         self.client_id = os.getenv("FORDLLM_CLIENT_ID", "")
         self.client_secret = os.getenv("FORDLLM_CLIENT_SECRET", "")

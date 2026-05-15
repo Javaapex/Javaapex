@@ -57,16 +57,8 @@ def _parse_origin_list(value: str) -> List[str]:
 
 
 def _parse_cors_origins() -> List[str]:
-    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "")
-    origins = _parse_origin_list(configured)
-    if origins:
-        return origins
-
-    frontend_origin = _normalize_origin(os.environ.get("FRONTEND_ORIGIN", ""))
-    if frontend_origin:
-        return [frontend_origin]
-
-    return [
+    # Default CORS origins - always include these
+    default_origins = {
         "https://java-apex-accelerator.onrender.com",
         "https://java-apex-backend.onrender.com",
         "http://localhost:3000",
@@ -76,7 +68,21 @@ def _parse_cors_origins() -> List[str]:
         "http://127.0.0.1:5173",
         "https://javaapex-frontend-r4sl.onrender.com",
         "https://javaapex-fl3n.onrender.com"
-    ]
+    }
+    
+    # Add any configured origins from environment variables
+    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    origins = _parse_origin_list(configured)
+    if origins:
+        # Merge configured with defaults
+        default_origins.update(origins)
+
+    # Also check FRONTEND_ORIGIN environment variable
+    frontend_origin = _normalize_origin(os.environ.get("FRONTEND_ORIGIN", ""))
+    if frontend_origin:
+        default_origins.add(frontend_origin)
+
+    return list(default_origins)
 
 
 CORS_ALLOWED_ORIGINS = _parse_cors_origins()

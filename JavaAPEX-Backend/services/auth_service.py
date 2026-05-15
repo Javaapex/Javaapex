@@ -4,6 +4,16 @@ from fastapi.responses import RedirectResponse, JSONResponse
 import os
 from urllib.parse import urlsplit
 
+
+def _get_github_session():
+    """Create a requests session with proxy disabled for GitHub API calls."""
+    session = requests.Session()
+    # Disable proxy for GitHub
+    session.proxies = {'http': None, 'https': None}
+    session.trust_env = False
+    return session
+
+
 router = APIRouter()
 
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "").strip()
@@ -66,7 +76,9 @@ def github_callback(code: str, request: Request):
         return oauth_not_configured_response()
 
     redirect_uri = resolve_redirect_uri(request)
-    token_resp = requests.post(
+    session = _get_github_session()
+    
+    token_resp = session.post(
         "https://github.com/login/oauth/access_token",
         headers={"Accept": "application/json"},
         data={
@@ -81,7 +93,8 @@ def github_callback(code: str, request: Request):
     access_token = token_json.get("access_token")
     if not access_token:
         return JSONResponse({"error": "Failed to get access token"}, status_code=400)
-    user_resp = requests.get(
+    
+    user_resp = session.get(
         "https://api.github.com/user",
         headers={"Authorization": f"token {access_token}"},
         timeout=30,

@@ -55,7 +55,11 @@ class GitHubAutoPushService:
     """Creates a new repo on GitHub and pushes a local directory into it."""
 
     def __init__(self):
-        self.proxy = os.getenv("HTTPS_PROXY", os.getenv("HTTP_PROXY", ""))
+        # Only use proxy on local/corporate network, not on cloud deployment
+        if os.environ.get("RENDER"):
+            self.proxy = ""  # No proxy on Render.com
+        else:
+            self.proxy = os.getenv("HTTPS_PROXY", os.getenv("HTTP_PROXY", ""))
 
     # ---- public API -------------------------------------------------------
     def push(

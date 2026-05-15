@@ -77,9 +77,10 @@ class HuggingFaceAIService:
         self.sub_model = FORDLLM_SUB_MODEL
         self.available = bool(self._auth.client_id and self._auth.client_secret)
 
-        # Set Ford proxy
-        os.environ.setdefault("HTTP_PROXY", "http://internet.ford.com:83")
-        os.environ.setdefault("HTTPS_PROXY", "http://internet.ford.com:83")
+        # Set Ford proxy - only on local/corporate network, not on cloud
+        if not os.environ.get("RENDER"):
+            os.environ.setdefault("HTTP_PROXY", "http://internet.ford.com:83")
+            os.environ.setdefault("HTTPS_PROXY", "http://internet.ford.com:83")
 
         logger.info(f"FordLLM AI Service initialized (available: {self.available})")
     

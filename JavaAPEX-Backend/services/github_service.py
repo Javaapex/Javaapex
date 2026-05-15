@@ -3,20 +3,31 @@ def get_github_client(token: str, repo_url: str = None):
     from github import Github
     import re
     import os
+    import requests
     
-    # Save original proxy settings and temporarily disable them for GitHub API
-    original_http_proxy = os.environ.get("HTTP_PROXY")
-    original_https_proxy = os.environ.get("HTTPS_PROXY")
-    original_http_proxy_lower = os.environ.get("http_proxy")
-    original_https_proxy_lower = os.environ.get("https_proxy")
+    # Create a custom session that bypasses proxy for GitHub
+    def _create_github_session():
+        """Create requests session with proxy disabled for GitHub"""
+        session = requests.Session()
+        # Explicitly set NO proxy for all github hosts
+        session.proxies = {
+            'http': None,
+            'https': None,
+        }
+        session.trust_env = False  # Don't read environment variables
+        return session
+    
+    # Save and clear proxy environment variables
+    env_vars_to_restore = {}
+    proxy_env_vars = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]
+    
+    for var in proxy_env_vars:
+        if var in os.environ:
+            env_vars_to_restore[var] = os.environ.pop(var)
     
     try:
-        # Disable proxy for GitHub API calls
-        os.environ.pop("HTTP_PROXY", None)
-        os.environ.pop("HTTPS_PROXY", None)
-        os.environ.pop("http_proxy", None)
-        os.environ.pop("https_proxy", None)
-        os.environ["NO_PROXY"] = "api.github.com,github.com"
+        # Set NO_PROXY to ensure it's not used
+        os.environ["NO_PROXY"] = "api.github.com,github.com,*.github.com"
         
         if repo_url and "github.com" in repo_url and not "github." in repo_url.replace("github.com", ""):
             # Public GitHub
@@ -42,14 +53,8 @@ def get_github_client(token: str, repo_url: str = None):
                 return Github()  # No token
     finally:
         # Restore original proxy settings
-        if original_http_proxy:
-            os.environ["HTTP_PROXY"] = original_http_proxy
-        if original_https_proxy:
-            os.environ["HTTPS_PROXY"] = original_https_proxy
-        if original_http_proxy_lower:
-            os.environ["http_proxy"] = original_http_proxy_lower
-        if original_https_proxy_lower:
-            os.environ["https_proxy"] = original_https_proxy_lower
+        for var, value in env_vars_to_restore.items():
+            os.environ[var] = value
 """
 Git Service - Handles GitHub and GitLab API interactions
 """

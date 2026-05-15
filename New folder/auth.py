@@ -14,9 +14,11 @@ def get_access_token(force_refresh=False):
     Fetches the access token, using a local cache if it is still valid.
     Set force_refresh=True to bypass the cache.
     """
-    # 1. Setup Proxy (as required for Ford network)
-    os.environ["HTTP_PROXY"] = "http://internet.ford.com:83"
-    os.environ["HTTPS_PROXY"] = "http://internet.ford.com:83"
+    # 1. Setup Proxy (as required for Ford network) - Only if not in cloud environment
+    # Check if we're in a cloud environment (like Render) where proxy is not needed
+    if not os.environ.get("RENDER"):  # RENDER is set by Render.com
+        os.environ["HTTP_PROXY"] = "http://internet.ford.com:83"
+        os.environ["HTTPS_PROXY"] = "http://internet.ford.com:83"
 
     # 2. Get Credentials
     client_id = os.getenv("FORDLLM_CLIENT_ID")

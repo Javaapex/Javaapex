@@ -2,28 +2,54 @@ def get_github_client(token: str, repo_url: str = None):
     """Return a Github client for public or enterprise GitHub."""
     from github import Github
     import re
-    if repo_url and "github.com" in repo_url and not "github." in repo_url.replace("github.com", ""):
-        # Public GitHub
-        if token and len(token.strip()) > 0:
-            return Github(token)
-        else:
-            return Github()  # No token for public access
-    elif repo_url:
-        # Enterprise (extract base domain)
-        m = re.match(r"https?://([^/]+)/", repo_url)
-        if m:
-            base_url = f"https://{m.group(1)}/api/v3"
+    import os
+    
+    # Save original proxy settings and temporarily disable them for GitHub API
+    original_http_proxy = os.environ.get("HTTP_PROXY")
+    original_https_proxy = os.environ.get("HTTPS_PROXY")
+    original_http_proxy_lower = os.environ.get("http_proxy")
+    original_https_proxy_lower = os.environ.get("https_proxy")
+    
+    try:
+        # Disable proxy for GitHub API calls
+        os.environ.pop("HTTP_PROXY", None)
+        os.environ.pop("HTTPS_PROXY", None)
+        os.environ.pop("http_proxy", None)
+        os.environ.pop("https_proxy", None)
+        os.environ["NO_PROXY"] = "api.github.com,github.com"
+        
+        if repo_url and "github.com" in repo_url and not "github." in repo_url.replace("github.com", ""):
+            # Public GitHub
             if token and len(token.strip()) > 0:
-                return Github(base_url=base_url, login_or_token=token)
+                return Github(token)
             else:
-                return Github(base_url=base_url)  # No token for enterprise
+                return Github()  # No token for public access
+        elif repo_url:
+            # Enterprise (extract base domain)
+            m = re.match(r"https?://([^/]+)/", repo_url)
+            if m:
+                base_url = f"https://{m.group(1)}/api/v3"
+                if token and len(token.strip()) > 0:
+                    return Github(base_url=base_url, login_or_token=token)
+                else:
+                    return Github(base_url=base_url)  # No token for enterprise
+            else:
+                raise Exception("Invalid GitHub Enterprise URL")
         else:
-            raise Exception("Invalid GitHub Enterprise URL")
-    else:
-        if token and len(token.strip()) > 0:
-            return Github(token)
-        else:
-            return Github()  # No token
+            if token and len(token.strip()) > 0:
+                return Github(token)
+            else:
+                return Github()  # No token
+    finally:
+        # Restore original proxy settings
+        if original_http_proxy:
+            os.environ["HTTP_PROXY"] = original_http_proxy
+        if original_https_proxy:
+            os.environ["HTTPS_PROXY"] = original_https_proxy
+        if original_http_proxy_lower:
+            os.environ["http_proxy"] = original_http_proxy_lower
+        if original_https_proxy_lower:
+            os.environ["https_proxy"] = original_https_proxy_lower
 """
 Git Service - Handles GitHub and GitLab API interactions
 """

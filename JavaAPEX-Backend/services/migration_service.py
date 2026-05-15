@@ -1953,23 +1953,9 @@ class ApplicationTest {{
                         # ===== DATA VALIDATION IMPROVEMENTS =====
 
                         # 12. Add basic data validation patterns
-                        validation_patterns = [
-                            (r'int\s+(\w+).*;', 'integer validation'),
-                            (r'String\s+(\w+).*;', 'string validation'),
-                            (r'double\s+(\w+).*;', 'numeric validation'),
-                        ]
-
-                        for pattern, validation_type in validation_patterns:
-                            variables = re.findall(pattern, content)
-                            for var in variables:
-                                if f'validate{var}' not in content and f'isValid{var}' not in content:
-                                    # Add validation method suggestion
-                                    content = re.sub(
-                                        rf'{pattern}',
-                                        rf'{pattern[:-1]} // TODO: Add {validation_type} method',
-                                        content
-                                    )
-                                    file_fixes += 1
+                        # (Skipped – regex-based replacements on raw patterns
+                        #  caused "bad escape \s" errors.  Validation hints are
+                        #  better added via static analysis or LLM review.)
 
                         # ===== OPTIONAL USAGE IMPROVEMENTS =====
 

@@ -94,6 +94,25 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower() or "service"
 
 
+def _long_path(p) -> str:
+    """Return a Windows long-path-safe string (\\\\?\\ prefix) for paths > 240 chars."""
+    s = str(p)
+    if os.name == "nt" and len(s) > 240 and not s.startswith("\\\\?\\"):
+        s = "\\\\?\\" + os.path.abspath(s)
+    return s
+
+
+def _safe_makedirs(p):
+    """os.makedirs that works with long Windows paths."""
+    os.makedirs(_long_path(p), exist_ok=True)
+
+
+def _safe_copy2(src, dest):
+    """shutil.copy2 that works with long Windows paths."""
+    _safe_makedirs(os.path.dirname(str(dest)))
+    shutil.copy2(_long_path(src), _long_path(dest))
+
+
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="ignore")
@@ -171,6 +190,105 @@ def _detect_build_tool(root: Path) -> str:
     if (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
         return "gradle"
     return "maven"
+
+
+# ---------------------------------------------------------------------------
+# Multi-module Maven detection
+# ---------------------------------------------------------------------------
+
+def _detect_maven_modules(root: Path) -> List[str]:
+    """Parse root pom.xml for <modules> and return module directory names."""
+    pom = root / "pom.xml"
+    if not pom.exists():
+        return []
+    content = _read_text(pom)
+    # Extract <modules>...</modules> block
+    m = re.search(r"<modules>(.*?)</modules>", content, re.DOTALL)
+    if not m:
+        return []
+    module_names = re.findall(r"<module>\s*([^<]+?)\s*</module>", m.group(1))
+    # Only keep modules that actually exist as directories with src/
+    valid = []
+    for mod in module_names:
+        mod_path = root / mod
+        if mod_path.is_dir() and (mod_path / "src").is_dir():
+            valid.append(mod)
+    return valid
+
+
+# Modules that are libraries/shared and should NOT become independent services
+_SHARED_MODULE_KEYWORDS = frozenset((
+    "common", "commons", "core", "shared", "util", "utils", "utility",
+    "mbg", "generator", "codegen", "model", "models", "entity", "entities",
+    "security", "auth", "authentication", "config", "configuration",
+    "infrastructure", "framework", "base", "parent", "bom", "dependencies",
+    "api", "interface", "interfaces", "dto", "proto",
+    "demo", "test", "tests", "sample", "samples", "example", "examples",
+))
+
+
+def _is_shared_module(module_name: str) -> bool:
+    """Check if a Maven module name suggests it's a shared library (not a deployable service)."""
+    # e.g. "mall-common" → token "common" is in _SHARED_MODULE_KEYWORDS
+    parts = module_name.lower().replace("_", "-").split("-")
+    return any(p in _SHARED_MODULE_KEYWORDS for p in parts)
+
+
+def _multi_module_boundaries(
+    root: Path,
+    modules: List[str],
+) -> List[Dict[str, Any]]:
+    """Treat each deployable Maven module as a microservice boundary.
+
+    Shared/library modules (common, security, mbg, etc.) are excluded from
+    the service list — their files will land in the shared-common module.
+    """
+    services: List[Dict[str, Any]] = []
+    for mod_name in modules:
+        if _is_shared_module(mod_name):
+            logger.info("Multi-module: skipping shared module '%s'", mod_name)
+            continue
+
+        mod_path = root / mod_name
+        mod_files = _scan_project(mod_path)
+        if not mod_files:
+            logger.info("Multi-module: skipping empty module '%s'", mod_name)
+            continue
+
+        # Detect if this module has controllers (i.e. is a deployable app)
+        has_controller = any(f.get("is_controller") for f in mod_files)
+        has_entity = any(f.get("is_entity") for f in mod_files)
+        has_main_app = any(f.get("is_main_app") for f in mod_files)
+
+        # If no controllers and no main application class, it's likely a library
+        if not has_controller and not has_main_app:
+            logger.info("Multi-module: skipping library module '%s' (no controllers/main)", mod_name)
+            continue
+
+        packages = sorted(set(f.get("package", "") for f in mod_files if f.get("package")))
+        class_tokens = sorted(set(_infer_class_domain(f.get("class_name", "")) for f in mod_files))
+
+        svc_name = _sanitize(mod_name)
+        if not svc_name.endswith("-service"):
+            svc_name = f"{svc_name}-service"
+
+        services.append({
+            "name": svc_name,
+            "packages": packages,
+            "class_tokens": class_tokens,
+            "description": f"Module {mod_name}",
+            "needs_database": has_entity,
+            "needs_messaging": False,
+            # Store source file paths directly so assignment is precise
+            "_module_files": [f["abs_path"] for f in mod_files],
+        })
+        logger.info(
+            "Multi-module: '%s' → %s (%d files, %d controllers)",
+            mod_name, svc_name, len(mod_files),
+            sum(1 for f in mod_files if f.get("is_controller")),
+        )
+
+    return services
 
 
 def _detect_java_version(root: Path) -> str:
@@ -333,10 +451,16 @@ def _infer_class_domain(class_name: str) -> str:
          PetTypeFormatter -> pettype, VetController -> vet
     """
     suffixes = (
-        "Controller", "RestController", "Service", "ServiceImpl",
-        "Repository", "Dao", "Entity", "Dto", "Mapper", "Converter",
-        "Formatter", "Validator", "Config", "Configuration",
-        "Test", "Tests", "Spec", "Helper", "Utils", "Util",
+        "Controller", "RestController", "Resource",
+        "Service", "ServiceImpl",
+        "Repository", "Dao",
+        "Entity", "Dto", "Mapper", "Converter",
+        "Formatter", "Validator",
+        "Config", "Configuration",
+        "Test", "Tests", "Spec", "IT",
+        "Helper", "Utils", "Util",
+        "Listener", "Handler", "Provider", "Factory",
+        "Adapter", "Client", "Proxy",
     )
     name = class_name
     for s in suffixes:
@@ -352,14 +476,8 @@ def _heuristic_boundaries(
 ) -> List[Dict[str, Any]]:
     """Heuristic-based microservice boundary detection as fallback.
 
-    Strategy:
-      1. Group files by sub-package after base_package (package-level domains).
-      2. Within each package domain, further split by *class-name domain* so
-         that e.g. Visit* and Owner* in the same ``owner`` package become
-         separate services.
-      3. Merge class-name domains that have only 1 file into their package
-         domain (avoids micro-services with a single file).
-      4. Fall back to route-based splitting if we still have < 2 services.
+    Detects whether the project uses a **domain-based** or **layered** architecture
+    and picks the right grouping strategy accordingly.
     """
     SHARED_DOMAINS = frozenset((
         "util", "utils", "common", "shared", "config", "configuration",
@@ -367,9 +485,39 @@ def _heuristic_boundaries(
         "base", "core", "security", "aop", "aspect", "filter", "interceptor",
     ))
 
+    LAYER_PACKAGES = frozenset((
+        "domain", "model", "models", "entity", "entities",
+        "repository", "repositories", "dao",
+        "service", "services",
+        "web", "rest", "controller", "controllers", "api",
+        "config", "configuration",
+        "security", "auth",
+        "dto", "mapper", "mappers",
+        "exception", "error", "errors",
+        "aop", "aspect", "filter", "interceptor",
+        "util", "utils", "common", "shared", "infrastructure",
+        "management", "logging",
+    ))
+
     base_depth = len(base_package.split(".")) if base_package else 0
 
-    # ---------- pass 1: package-level grouping ----------
+    # ---------- pass 0: detect layered vs domain architecture ----------
+    pkg_segments: Set[str] = set()
+    for f in files:
+        pkg = f.get("package", "")
+        if not pkg:
+            continue
+        parts = pkg.split(".")
+        if len(parts) > base_depth:
+            pkg_segments.add(parts[base_depth])
+
+    non_layer = pkg_segments - LAYER_PACKAGES
+    is_layered = len(non_layer) < 2
+    if is_layered:
+        logger.info("Detected LAYERED architecture (sub-packages: %s) – using entity-centric grouping", pkg_segments)
+        return _entity_centric_boundaries(files, base_package)
+
+    # ---------- pass 1: package-level grouping (domain architecture) ----------
     pkg_domain_map: Dict[str, List[Dict[str, Any]]] = {}
     for f in files:
         pkg = f.get("package", "")
@@ -382,44 +530,36 @@ def _heuristic_boundaries(
         pkg_domain_map.setdefault(pkg_domain, []).append(f)
 
     # ---------- pass 2: class-name sub-splitting ----------
-    # For each package domain, detect whether multiple logical domains coexist
-    # (e.g. Owner*, Visit*, Pet* all in the "owner" package).
     domain_files_map: Dict[str, List[Dict[str, Any]]] = {}
-
     for pkg_domain, pfiles in pkg_domain_map.items():
         if pkg_domain == "_shared":
             continue
-
-        # Collect class-name domains present in this package domain
         cls_domains: Dict[str, List[Dict[str, Any]]] = {}
         for f in pfiles:
             cd = _infer_class_domain(f.get("class_name", ""))
             cls_domains.setdefault(cd, []).append(f)
-
-        # Only sub-split if there are multiple distinct class-name domains
-        # with at least one having a controller or entity (i.e. a real bounded context)
         meaningful = {
             cd: fls for cd, fls in cls_domains.items()
             if any(fl.get("is_controller") or fl.get("is_entity") for fl in fls)
         }
-
         if len(meaningful) >= 2:
-            # Sub-split: each meaningful class-domain becomes its own service
             leftover: List[Dict[str, Any]] = []
             for cd, fls in cls_domains.items():
                 if cd in meaningful and len(fls) >= 1:
                     domain_files_map.setdefault(cd, []).extend(fls)
                 else:
                     leftover.extend(fls)
-            # Assign leftover files to the largest sub-domain
             if leftover:
                 biggest = max(meaningful.keys(), key=lambda k: len(meaningful[k]))
                 domain_files_map.setdefault(biggest, []).extend(leftover)
         else:
-            # Keep as a single domain
             domain_files_map.setdefault(pkg_domain, []).extend(pfiles)
 
-    # ---------- pass 3: merge tiny domains (< 2 files and no controller) ----------
+    if len(domain_files_map) < 2:
+        logger.info("Package grouping yielded < 2 domains – falling back to entity-centric")
+        return _entity_centric_boundaries(files, base_package)
+
+    # ---------- pass 3: merge tiny domains ----------
     final_map: Dict[str, List[Dict[str, Any]]] = {}
     merge_target: Optional[str] = None
     for domain, dfiles in sorted(domain_files_map.items(), key=lambda x: -len(x[1])):
@@ -432,12 +572,119 @@ def _heuristic_boundaries(
         else:
             final_map.setdefault(domain, []).extend(dfiles)
 
-    # ---------- build service list ----------
+    return _build_service_list(final_map, files)
+
+
+def _entity_centric_boundaries(
+    files: List[Dict[str, Any]],
+    base_package: str,
+) -> List[Dict[str, Any]]:
+    """Group files across ALL layers by entity/class-name domain.
+
+    For layered architectures (JHipster, typical Spring Boot) where packages
+    are ``base.domain``, ``base.repository``, ``base.web.rest``, etc., we
+    group by entity domain token:
+        BankAccount.java + BankAccountRepository + BankAccountResource
+        + BankAccountService → bankaccount-service
+    """
+    INFRA_CLASS_TOKENS = frozenset((
+        "application", "app", "main",
+        "config", "configuration", "webconfigurer", "databaseconfiguration",
+        "securityconfiguration", "securityutils",
+        "abstractauditingentity", "loggingaspect", "applicationwebxml",
+        "generatedbyjhipster", "packageinfo", "constants",
+        "headerutil", "paginationutil", "responseutil",
+        "authorityconstants", "errorconstants", "profileinfo",
+        "springboottest", "testutil", "integrationtest",
+    ))
+
+    entity_map: Dict[str, List[Dict[str, Any]]] = {}
+    infra_files: List[Dict[str, Any]] = []
+
+    for f in files:
+        if f.get("is_main_app") or f.get("is_config"):
+            infra_files.append(f)
+            continue
+
+        cd = _infer_class_domain(f.get("class_name", ""))
+        if not cd or cd in INFRA_CLASS_TOKENS:
+            infra_files.append(f)
+            continue
+
+        entity_map.setdefault(cd, []).append(f)
+
+    # Keep entity domains with at least 2 roles (entity+repo, ctrl+service, etc.)
+    meaningful: Dict[str, List[Dict[str, Any]]] = {}
+    leftover: List[Dict[str, Any]] = []
+    for cd, fls in entity_map.items():
+        has_ctrl = any(fl.get("is_controller") for fl in fls)
+        has_entity = any(fl.get("is_entity") for fl in fls)
+        has_repo = any(fl.get("is_repository") for fl in fls)
+        has_svc = any(fl.get("is_service") for fl in fls)
+        role_count = sum([has_ctrl, has_entity, has_repo, has_svc])
+        if role_count >= 2 or (len(fls) >= 2 and (has_ctrl or has_entity)):
+            meaningful[cd] = fls
+        else:
+            leftover.extend(fls)
+
+    if len(meaningful) < 2:
+        logger.info("Entity-centric grouping found < 2 bounded contexts – trying route-based")
+        return _route_based_boundaries(files, base_package)
+
+    # Merge leftover files by class-name affinity
+    for f in leftover:
+        cd = _infer_class_domain(f.get("class_name", ""))
+        matched = False
+        for domain in meaningful:
+            if cd and (cd.startswith(domain) or domain.startswith(cd)):
+                meaningful[domain].append(f)
+                matched = True
+                break
+        if not matched:
+            infra_files.append(f)
+
+    logger.info(
+        "Entity-centric decomposition: %d services (%s), %d infra/shared files",
+        len(meaningful), list(meaningful.keys()), len(infra_files),
+    )
+    return _build_service_list(meaningful, files)
+
+
+def _route_based_boundaries(
+    files: List[Dict[str, Any]],
+    base_package: str,
+) -> List[Dict[str, Any]]:
+    """Last-resort: create services based on REST route paths."""
+    route_domains: Dict[str, List[Dict[str, Any]]] = {}
+    for f in files:
+        for route in f.get("route_paths", []):
+            domain = _infer_domain_from_route(route)
+            if domain:
+                route_domains.setdefault(domain, []).append(f)
+    services: List[Dict[str, Any]] = []
+    for domain, domain_files in route_domains.items():
+        if not any(s["name"].startswith(domain) for s in services):
+            packages = sorted(set(f.get("package", "") for f in domain_files if f.get("package")))
+            services.append({
+                "name": f"{_sanitize(domain)}-service",
+                "packages": packages,
+                "class_tokens": [domain],
+                "description": f"REST API for {domain}",
+                "needs_database": any(f.get("is_entity") for f in domain_files),
+                "needs_messaging": False,
+            })
+    return services[:8]
+
+
+def _build_service_list(
+    final_map: Dict[str, List[Dict[str, Any]]],
+    all_files: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Convert a domain→files map into the service boundary list."""
     services: List[Dict[str, Any]] = []
     for domain, dfiles in sorted(final_map.items(), key=lambda x: -len(x[1])):
         has_entity = any(f.get("is_entity") for f in dfiles)
         packages = sorted(set(f.get("package", "") for f in dfiles if f.get("package")))
-        # Also store class-name tokens for smarter file assignment later
         class_tokens = sorted(set(_infer_class_domain(f.get("class_name", "")) for f in dfiles))
         services.append({
             "name": f"{_sanitize(domain)}-service",
@@ -447,27 +694,11 @@ def _heuristic_boundaries(
             "needs_database": has_entity,
             "needs_messaging": False,
         })
-
-    # ---------- route-based fallback ----------
     if len(services) < 2:
-        route_domains: Dict[str, List[Dict[str, Any]]] = {}
-        for f in files:
-            for route in f.get("route_paths", []):
-                domain = _infer_domain_from_route(route)
-                if domain:
-                    route_domains.setdefault(domain, []).append(f)
-        for domain, domain_files in route_domains.items():
-            if not any(s["name"].startswith(domain) for s in services):
-                packages = sorted(set(f.get("package", "") for f in domain_files if f.get("package")))
-                services.append({
-                    "name": f"{_sanitize(domain)}-service",
-                    "packages": packages,
-                    "class_tokens": [domain],
-                    "description": f"REST API for {domain}",
-                    "needs_database": any(f.get("is_entity") for f in domain_files),
-                    "needs_messaging": False,
-                })
-
+        route_services = _route_based_boundaries(all_files, "")
+        for rs in route_services:
+            if not any(s["name"] == rs["name"] for s in services):
+                services.append(rs)
     return services[:8]
 
 
@@ -1054,27 +1285,42 @@ class MicroserviceConversionService:
         for c in controllers[:10]:
             logger.info("  Controller: %s.%s  routes=%s", c.get("package"), c.get("class_name"), c.get("route_paths"))
 
-        # 2. Determine service boundaries (LLM first, heuristic fallback)
-        llm_boundaries = await _llm_propose_boundaries(files, base_package)
-        if llm_boundaries:
-            boundaries = llm_boundaries
-            logger.info("Using LLM-proposed boundaries: %s", [b["name"] for b in boundaries])
-        else:
-            # Try to use readiness report candidates if available
-            if readiness_report and readiness_report.serviceCandidates:
-                boundaries = [
-                    {
-                        "name": _sanitize(c.name),
-                        "packages": c.packages,
-                        "description": ", ".join(c.evidence[:2]) if c.evidence else c.name,
-                        "needs_database": c.transactional,
-                        "needs_messaging": bool(c.scaling_signals),
-                    }
-                    for c in readiness_report.serviceCandidates
-                ]
+        # 2. Detect multi-module Maven project
+        maven_modules = _detect_maven_modules(root)
+        is_multi_module = len(maven_modules) >= 2
+        if is_multi_module:
+            logger.info("Detected MULTI-MODULE Maven project with modules: %s", maven_modules)
+
+        # 3. Determine service boundaries (multi-module > LLM > heuristic)
+        if is_multi_module:
+            boundaries = _multi_module_boundaries(root, maven_modules)
+            if len(boundaries) >= 2:
+                logger.info("Using multi-module boundaries: %s", [b["name"] for b in boundaries])
             else:
-                boundaries = _heuristic_boundaries(files, base_package)
-            logger.info("Using heuristic boundaries: %s", [b["name"] for b in boundaries])
+                logger.info("Multi-module produced < 2 services, falling back to LLM/heuristic")
+                is_multi_module = False  # fall through
+
+        if not is_multi_module:
+            llm_boundaries = await _llm_propose_boundaries(files, base_package)
+            if llm_boundaries:
+                boundaries = llm_boundaries
+                logger.info("Using LLM-proposed boundaries: %s", [b["name"] for b in boundaries])
+            else:
+                # Try to use readiness report candidates if available
+                if readiness_report and readiness_report.serviceCandidates:
+                    boundaries = [
+                        {
+                            "name": _sanitize(c.name),
+                            "packages": c.packages,
+                            "description": ", ".join(c.evidence[:2]) if c.evidence else c.name,
+                            "needs_database": c.transactional,
+                            "needs_messaging": bool(c.scaling_signals),
+                        }
+                        for c in readiness_report.serviceCandidates
+                    ]
+                else:
+                    boundaries = _heuristic_boundaries(files, base_package)
+                logger.info("Using heuristic boundaries: %s", [b["name"] for b in boundaries])
 
         if not boundaries:
             # Last-resort: create one service per controller
@@ -1119,8 +1365,39 @@ class MicroserviceConversionService:
             ))
 
         # 4. Assign files to services
+        # For multi-module projects, build a direct abs_path → MicroserviceProject map
+        _module_file_map: Dict[str, MicroserviceProject] = {}
+        if is_multi_module:
+            for boundary in boundaries:
+                module_files = boundary.get("_module_files", [])
+                if module_files:
+                    # Find the matching MicroserviceProject by name
+                    bname = boundary["name"]
+                    for ms in ms_projects:
+                        if ms.name == bname:
+                            for fpath in module_files:
+                                _module_file_map[fpath] = ms
+                            break
+
         unassigned_files: List[Dict[str, Any]] = []
         for f in files:
+            abs_path = f.get("abs_path", "")
+
+            # --- Multi-module direct assignment ---
+            if is_multi_module and abs_path in _module_file_map:
+                ms = _module_file_map[abs_path]
+                ms.source_files.append(abs_path)
+                if f.get("is_controller"):
+                    ms.controllers.append(f["class_name"])
+                if f.get("is_entity"):
+                    ms.entities.append(f["class_name"])
+                    ms.has_database = True
+                if f.get("is_repository"):
+                    ms.repositories.append(f["class_name"])
+                if f.get("is_service"):
+                    ms.services.append(f["class_name"])
+                continue
+
             pkg = f.get("package", "")
             cls_domain = _infer_class_domain(f.get("class_name", ""))
             assigned = False
@@ -1275,8 +1552,7 @@ class MicroserviceConversionService:
                     dest = svc_dir / "src" / "main" / "java" / file_pkg / src.name
                 else:
                     dest = src_main / src.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest)
+                _safe_copy2(src, dest)
 
             # Copy shared/model files into each service so it compiles
             for uf in unassigned_files:
@@ -1290,9 +1566,8 @@ class MicroserviceConversionService:
                     dest = svc_dir / "src" / "main" / "java" / file_pkg / src.name
                 else:
                     dest = src_main / src.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if not dest.exists():
-                    shutil.copy2(src, dest)
+                if not Path(_long_path(dest)).exists():
+                    _safe_copy2(src, dest)
 
             # Also copy original resource files (application.properties, templates, static, etc.)
             original_resources = root / "src" / "main" / "resources"
@@ -1302,8 +1577,7 @@ class MicroserviceConversionService:
                         rel = res_item.relative_to(original_resources)
                         dest = src_resources / rel
                         if not dest.exists():
-                            dest.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(res_item, dest)
+                            _safe_copy2(res_item, dest)
 
             # Service README
             readme_lines = [
@@ -1362,8 +1636,7 @@ class MicroserviceConversionService:
                     dest = shared_dir / "src" / "main" / "java" / file_pkg / src.name
                 else:
                     dest = shared_dir / "src" / "main" / "java" / src.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest)
+                _safe_copy2(src, dest)
 
             shared_readme = [
                 "# Shared Common Library",

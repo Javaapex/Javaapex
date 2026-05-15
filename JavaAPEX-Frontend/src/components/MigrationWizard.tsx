@@ -385,7 +385,11 @@ const readSessionJson = <T,>(key: string): T | null => {
 
 const writeSessionJson = (key: string, value: unknown) => {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(key, JSON.stringify(value));
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.warn(`sessionStorage write failed for key "${key}"`, e);
+  }
 };
 
 const getIndicatorStep = (step: number) => Math.min(step, MIGRATION_STEPS.length);
@@ -3416,8 +3420,14 @@ export default function MigrationWizard({ onBackToHome }: { onBackToHome?: () =>
     if (typeof window === "undefined") return;
 
     if (repoAnalysis) {
-      const serializedAnalysis = JSON.stringify(repoAnalysis);
-      window.sessionStorage.setItem(WIZARD_REPO_ANALYSIS_KEY, serializedAnalysis);
+      try {
+        const serializedAnalysis = JSON.stringify(repoAnalysis);
+        if (serializedAnalysis.length < 4 * 1024 * 1024) {
+          window.sessionStorage.setItem(WIZARD_REPO_ANALYSIS_KEY, serializedAnalysis);
+        }
+      } catch (e) {
+        console.warn("sessionStorage quota exceeded for repo analysis", e);
+      }
     } else {
       window.sessionStorage.removeItem(WIZARD_REPO_ANALYSIS_KEY);
     }
@@ -3427,7 +3437,53 @@ export default function MigrationWizard({ onBackToHome }: { onBackToHome?: () =>
   if (typeof window === "undefined") return;
 
   if (migrationJob) {
-    window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, JSON.stringify(migrationJob));
+    try {
+      // Strip large fields before persisting to avoid QuotaExceededError
+      const slim = { ...migrationJob };
+      delete (slim as any).sonar_report;
+      delete (slim as any).code_changes;
+      delete (slim as any).fossa_report;
+      delete (slim as any).test_results;
+      delete (slim as any).logs;
+      delete (slim as any).detailed_logs;
+      delete (slim as any).migration_logs;
+      delete (slim as any).sonar_bug_details;
+      delete (slim as any).sonar_vulnerability_details;
+      delete (slim as any).sonar_code_smell_details;
+      delete (slim as any).sonar_security_hotspot_details;
+      delete (slim as any).extra_metadata;
+      const serialized = JSON.stringify(slim);
+      // Only persist if under 4 MB to stay within sessionStorage quota
+      if (serialized.length < 4 * 1024 * 1024) {
+        window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, serialized);
+      } else {
+        // Too large even after slimming – store only essential fields
+        const minimal = {
+          job_id: migrationJob.job_id,
+          status: migrationJob.status,
+          repo_url: (migrationJob as any).repo_url,
+          branch_url: (migrationJob as any).branch_url,
+          target_branch: (migrationJob as any).target_branch,
+        };
+        window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, JSON.stringify(minimal));
+      }
+    } catch (e) {
+      // QuotaExceededError – clear stale data and retry with minimal payload
+      console.warn("sessionStorage quota exceeded for migration job, storing minimal data", e);
+      try {
+        window.sessionStorage.removeItem(WIZARD_REPO_ANALYSIS_KEY);
+        const minimal = {
+          job_id: migrationJob.job_id,
+          status: migrationJob.status,
+          repo_url: (migrationJob as any).repo_url,
+          branch_url: (migrationJob as any).branch_url,
+        };
+        window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, JSON.stringify(minimal));
+      } catch (_) {
+        // Last resort – just remove it
+        window.sessionStorage.removeItem(WIZARD_MIGRATION_JOB_KEY);
+      }
+    }
   } else {
     window.sessionStorage.removeItem(WIZARD_MIGRATION_JOB_KEY);
   }
@@ -9487,6 +9543,15 @@ return `${seconds}s`;
   };
 
   const renderStep11 = () => {
+    if (!migrationJob) {
+      return (
+        <div style={{ textAlign: "center", padding: 60 }}>
+          <h2 style={{ color: "#1e293b", marginBottom: 12 }}>No Migration Data Available</h2>
+          <p style={{ color: "#64748b", marginBottom: 24 }}>The migration report data could not be loaded. This may happen if the page was refreshed after a large migration.</p>
+          <button style={styles.primaryBtn} onClick={() => setStep(1)}>← Start New Migration</button>
+        </div>
+      );
+    }
     const sonarReport = (migrationJob?.sonar_report ?? null) as SonarReport | null;
     const sonarBugDetails = sonarReport?.bug_details ?? [];
     const sonarVulnerabilityDetails = sonarReport?.vulnerability_details ?? [];

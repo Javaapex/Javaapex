@@ -8460,19 +8460,42 @@ async def run_migration(job_id: str, request: MigrationRequest):
                             continue
                         item_path = os.path.join(clone_path, item)
                         try:
+                            safe_path = ("\\\\?\\" + os.path.abspath(item_path)) if os.name == "nt" else item_path
                             if os.path.isdir(item_path):
-                                shutil.rmtree(item_path)
+                                shutil.rmtree(safe_path)
                             else:
-                                os.remove(item_path)
+                                os.remove(safe_path)
                         except Exception:
                             pass
                     # Copy all microservice output into clone_path
+                    def _long_path_copy_tree(src_dir, dst_dir):
+                        """Copy directory tree with Windows long-path support."""
+                        errors = []
+                        for dirpath, dirnames, filenames in os.walk(src_dir):
+                            rel = os.path.relpath(dirpath, src_dir)
+                            target_dir = os.path.join(dst_dir, rel)
+                            # Use \\?\ prefix for long paths on Windows
+                            safe_target = ("\\\\?\\" + os.path.abspath(target_dir)) if os.name == "nt" and len(target_dir) > 240 else target_dir
+                            os.makedirs(safe_target, exist_ok=True)
+                            for fn in filenames:
+                                s = os.path.join(dirpath, fn)
+                                d = os.path.join(target_dir, fn)
+                                safe_s = ("\\\\?\\" + os.path.abspath(s)) if os.name == "nt" and len(s) > 240 else s
+                                safe_d = ("\\\\?\\" + os.path.abspath(d)) if os.name == "nt" and len(d) > 240 else d
+                                try:
+                                    shutil.copy2(safe_s, safe_d)
+                                except Exception as e:
+                                    errors.append((s, d, str(e)))
+                        return errors
+
                     for item in os.listdir(ms_out):
                         src_item = os.path.join(ms_out, item)
                         dst_item = os.path.join(clone_path, item)
                         try:
                             if os.path.isdir(src_item):
-                                shutil.copytree(src_item, dst_item)
+                                copy_errors = _long_path_copy_tree(src_item, dst_item)
+                                if copy_errors:
+                                    add_log(job_id, f"WARNING: {len(copy_errors)} files in {item} had long-path copy issues (skipped)")
                             else:
                                 shutil.copy2(src_item, dst_item)
                         except Exception as cp_err:

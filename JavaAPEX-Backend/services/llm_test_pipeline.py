@@ -914,11 +914,16 @@ class LLMTestPipelineService:
         pkg = java_package or "llm"
         rel_pkg = pkg.replace(".", os.sep)
         target_dir = os.path.join(module_root, "src", "test", "java", rel_pkg)
+        # Use \\?\ prefix on Windows to support paths > 260 chars
+        if os.name == "nt":
+            target_dir = "\\\\?\\" + os.path.abspath(target_dir) if not target_dir.startswith("\\\\?\\") else target_dir
         os.makedirs(target_dir, exist_ok=True)
         path = os.path.join(target_dir, filename)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(content)
-        return str(Path(path).resolve())
+        # Strip \\?\ prefix for display
+        resolved = str(Path(path).resolve())
+        return resolved
 
     def _is_android_gradle_module(self, module_root: str) -> bool:
         try:
@@ -1205,11 +1210,15 @@ class LLMTestPipelineService:
             content = self._coerce_junit_style(content, junit_style=junit_style)
 
             filename = f"{cls}Test.java"
-            p = self._write_java_test_file(module_root, pkg, filename, content)
-            generated_paths.append(p)
-            if not primary_path:
-                primary_path = p
-                primary_content = content
+            try:
+                p = self._write_java_test_file(module_root, pkg, filename, content)
+                generated_paths.append(p)
+                if not primary_path:
+                    primary_path = p
+                    primary_content = content
+            except OSError as e:
+                logger.warning("Could not write test file %s/%s: %s", module_root, filename, e)
+                continue
 
         # If no Java targets exist, generate Kotlin unit tests instead (common in Android projects).
         for target in kotlin_targets:

@@ -652,9 +652,14 @@ export default function MigrationWizard({ onBackToHome }: { onBackToHome?: () =>
   const [localProjectUploadError, setLocalProjectUploadError] = useState("");
   const [localProjectUploadWarning, setLocalProjectUploadWarning] = useState("");
   // const [migrationJob, setMigrationJob] = useState<MigrationResult | null>(null);
-  const [migrationJob, setMigrationJob] = useState<MigrationResult | null>(() =>
-  readSessionJson<MigrationResult>(WIZARD_MIGRATION_JOB_KEY)
-);
+  const [migrationJob, setMigrationJob] = useState<MigrationResult | null>(null);
+  
+  // Track if we're restoring job_id from sessionStorage on mount
+  const [restoredJobId, setRestoredJobId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = readSessionJson<{job_id?: string}>(WIZARD_MIGRATION_JOB_KEY);
+    return stored?.job_id || null;
+  });
   const [migrationLogs, setMigrationLogs] = useState<string[]>([]);
   const [error, setError] = useState<string>("");
   const [targetVersionRequiredError, setTargetVersionRequiredError] = useState(false);
@@ -3426,12 +3431,29 @@ export default function MigrationWizard({ onBackToHome }: { onBackToHome?: () =>
   useEffect(() => {
   if (typeof window === "undefined") return;
 
-  if (migrationJob) {
-    window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, JSON.stringify(migrationJob));
+  // Only store job_id in sessionStorage to avoid QuotaExceededError
+  // The full migrationJob data is fetched from API as needed
+  if (migrationJob?.job_id) {
+    window.sessionStorage.setItem(WIZARD_MIGRATION_JOB_KEY, JSON.stringify({ job_id: migrationJob.job_id }));
   } else {
     window.sessionStorage.removeItem(WIZARD_MIGRATION_JOB_KEY);
   }
-}, [migrationJob]);
+}, [migrationJob?.job_id]);
+
+  // Fetch full migration job data when restoring from sessionStorage
+  useEffect(() => {
+    if (!restoredJobId || migrationJob) return;
+    
+    getMigrationStatus(restoredJobId)
+      .then((job) => {
+        setMigrationJob(job);
+        setStep(7); // Move to report step
+      })
+      .catch((err) => {
+        console.warn("Failed to restore migration job from session:", err);
+        setRestoredJobId(null);
+      });
+  }, [restoredJobId, migrationJob]);
 
   useEffect(() => {
     writeSessionJson(WIZARD_FORM_STATE_KEY, {

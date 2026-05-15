@@ -49,4 +49,4 @@ ENV UVICORN_MAX_REQUESTS=1000
 ENV UVICORN_TIMEOUT_KEEP_ALIVE=300
 ENV UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=30
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --limit-concurrency 10 --limit-max-requests 1000 --timeout-keep-alive 300 --timeout-graceful-shutdown 30 --h11-max-incomplete-event-size 1073741824"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --limit-concurrency 100 --limit-max-requests 1000 --timeout-keep-alive 300 --timeout-graceful-shutdown 30 --h11-max-incomplete-event-size 1073741824"]

@@ -419,6 +419,7 @@ jobs:
 
       - name: Ensure Render service exists and trigger deploy
         id: render
+        if: ${{{{ steps.fossa.outputs.status == 'success' && steps.pyscode.outputs.status == 'success' && steps.sonar.outputs.status == 'success' }}}}
         shell: bash
         continue-on-error: true
         env:

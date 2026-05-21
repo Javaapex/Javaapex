@@ -333,6 +333,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy-and-checks:
@@ -353,6 +354,25 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "pipeline_start_time=$NOW_UTC" >> "$GITHUB_OUTPUT"
           mkdir -p .ci-logs
+
+      - name: Wait for controller sync
+        shell: bash
+        env:
+          GH_TOKEN: ${{{{ github.token }}}}
+        run: |
+          set -euo pipefail
+          REPO="${{{{ github.repository }}}}"
+          for i in $(seq 1 24); do
+            READY="$(gh api "repos/$REPO/actions/variables/SYNC_READY" --jq '.value' 2>/dev/null || true)"
+            if [[ "$READY" == "true" ]]; then
+              echo "SYNC_READY=true detected."
+              exit 0
+            fi
+            echo "Waiting for controller to provision vars/secrets... attempt $i/24"
+            sleep 15
+          done
+          echo "Timed out waiting for SYNC_READY=true. Re-run this workflow after controller sync."
+          exit 1
 
       - name: Run FOSSA check
         id: fossa

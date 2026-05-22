@@ -784,9 +784,23 @@ jobs:
                     "url": repo.html_url,
                     "default_branch": repo.default_branch,
                     "language": repo.language,
-                    "description": repo.description or ""
+                    "description": repo.description or "",
+                    "pushed_at": repo.pushed_at.isoformat() if repo.pushed_at else None,
+                    "updated_at": repo.updated_at.isoformat() if repo.updated_at else None,
+                    "created_at": repo.created_at.isoformat() if repo.created_at else None,
                 })
-            
+
+            # Prioritize latest activity first so downstream controller/env-var sync
+            # workflows process the newest repository before older ones.
+            repos.sort(
+                key=lambda item: (
+                    item.get("pushed_at") or "",
+                    item.get("updated_at") or "",
+                    item.get("created_at") or "",
+                ),
+                reverse=True,
+            )
+
             return repos
         except GithubException as e:
             error_msg = e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)

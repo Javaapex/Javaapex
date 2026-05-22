@@ -616,7 +616,7 @@ jobs:
                   server.sendmail(from_email, [to_email], msg.as_string())
               print("Status email sent.")
           except Exception as exc:
-              print(f"Status email send failed: {exc}")
+              print(f"Status email send failed: {{exc}}")
               raise SystemExit(0)
           PY
 

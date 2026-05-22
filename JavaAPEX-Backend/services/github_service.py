@@ -406,6 +406,9 @@ jobs:
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/fossa.log"
+          if ! command -v fossa >/dev/null 2>&1; then
+            curl -sSL https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | bash >> "$LOG_FILE" 2>&1 || true
+          fi
           CMD="${{FOSSA_COMMAND:-fossa analyze && fossa test --format json}}"
           bash -lc "$CMD" > "$LOG_FILE" 2>&1
           EXIT_CODE=$?
@@ -440,6 +443,11 @@ jobs:
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/sonar.log"
+          if ! command -v sonar-scanner >/dev/null 2>&1; then
+            curl -sSLo /tmp/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-6.2.1.4610-linux-x64.zip >> "$LOG_FILE" 2>&1 || true
+            unzip -q /tmp/sonar-scanner.zip -d /tmp >> "$LOG_FILE" 2>&1 || true
+            export PATH="/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+          fi
           DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
           DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
           CMD="${{SONAR_COMMAND:-$DEFAULT_CMD}}"
@@ -573,6 +581,7 @@ jobs:
 
       - name: Send status email
         if: always()
+        continue-on-error: true
         shell: bash
         run: |
           python3 - <<'PY'
@@ -600,11 +609,15 @@ jobs:
           msg["From"] = from_email
           msg["To"] = to_email
 
-          with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-              server.starttls()
-              server.login(smtp_user, smtp_password)
-              server.sendmail(from_email, [to_email], msg.as_string())
-          print("Status email sent.")
+          try:
+              with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                  server.starttls()
+                  server.login(smtp_user, smtp_password)
+                  server.sendmail(from_email, [to_email], msg.as_string())
+              print("Status email sent.")
+          except Exception as exc:
+              print(f"Status email send failed: {exc}")
+              raise SystemExit(0)
           PY
 
       - name: Fail workflow if any check or deploy failed

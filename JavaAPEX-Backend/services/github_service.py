@@ -399,6 +399,42 @@ jobs:
           echo "pipeline_start_time=$NOW_UTC" >> "$GITHUB_OUTPUT"
           mkdir -p .ci-logs
 
+      - name: Install quality tools
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          LOG_FILE=".ci-logs/tooling.log"
+          echo "[TOOLS] Starting dependency install..." > "$LOG_FILE"
+          sudo apt-get update >> "$LOG_FILE" 2>&1 || true
+          sudo apt-get install -y curl unzip jq openjdk-17-jre >> "$LOG_FILE" 2>&1 || true
+
+          if ! command -v fossa >/dev/null 2>&1; then
+            echo "[TOOLS] Installing FOSSA CLI..." >> "$LOG_FILE"
+            curl -sSL https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | bash >> "$LOG_FILE" 2>&1 || true
+          fi
+          if command -v fossa >/dev/null 2>&1; then
+            echo "[TOOLS] FOSSA CLI installed: $(command -v fossa)" >> "$LOG_FILE"
+          else
+            echo "[TOOLS] FOSSA CLI not available after install attempt." >> "$LOG_FILE"
+          fi
+
+          if ! command -v sonar-scanner >/dev/null 2>&1; then
+            echo "[TOOLS] Installing SonarScanner CLI..." >> "$LOG_FILE"
+            curl -sSLo /tmp/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-6.2.1.4610-linux-x64.zip >> "$LOG_FILE" 2>&1 || true
+            unzip -q /tmp/sonar-scanner.zip -d /tmp >> "$LOG_FILE" 2>&1 || true
+            if [[ -d /tmp/sonar-scanner-6.2.1.4610-linux-x64/bin ]]; then
+              echo "/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin" >> "$GITHUB_PATH"
+            fi
+          fi
+          if command -v sonar-scanner >/dev/null 2>&1; then
+            echo "[TOOLS] SonarScanner installed: $(command -v sonar-scanner)" >> "$LOG_FILE"
+          elif [[ -x /tmp/sonar-scanner-6.2.1.4610-linux-x64/bin/sonar-scanner ]]; then
+            echo "[TOOLS] SonarScanner available at /tmp path and added to GITHUB_PATH." >> "$LOG_FILE"
+          else
+            echo "[TOOLS] SonarScanner not available after install attempt." >> "$LOG_FILE"
+          fi
+
       - name: Run FOSSA check
         id: fossa
         shell: bash
@@ -406,16 +442,26 @@ jobs:
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/fossa.log"
+          FAILURE_KIND=""
           if ! command -v fossa >/dev/null 2>&1; then
-            curl -sSL https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | bash >> "$LOG_FILE" 2>&1 || true
+            echo "[FOSSA] tool_missing: fossa CLI is unavailable on runner." >> "$LOG_FILE"
+            EXIT_CODE=127
+            FAILURE_KIND="tool_missing"
+          else
+            CMD="${{FOSSA_COMMAND:-fossa analyze && fossa test --format json}}"
+            echo "[FOSSA] Running command: $CMD" >> "$LOG_FILE"
+            bash -lc "$CMD" > "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            if [[ $EXIT_CODE -ne 0 ]]; then
+              FAILURE_KIND="quality_failure"
+              echo "[FOSSA] quality_failure: command exited with code $EXIT_CODE." >> "$LOG_FILE"
+            fi
           fi
-          CMD="${{FOSSA_COMMAND:-fossa analyze && fossa test --format json}}"
-          bash -lc "$CMD" > "$LOG_FILE" 2>&1
-          EXIT_CODE=$?
           END_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           if [[ $EXIT_CODE -eq 0 ]]; then STATUS="success"; else STATUS="failed"; fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          echo "failure_kind=$FAILURE_KIND" >> "$GITHUB_OUTPUT"
           echo "started_at=$START_TIME" >> "$GITHUB_OUTPUT"
           echo "ended_at=$END_TIME" >> "$GITHUB_OUTPUT"
 
@@ -443,20 +489,29 @@ jobs:
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/sonar.log"
+          FAILURE_KIND=""
+          export PATH="/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
           if ! command -v sonar-scanner >/dev/null 2>&1; then
-            curl -sSLo /tmp/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-6.2.1.4610-linux-x64.zip >> "$LOG_FILE" 2>&1 || true
-            unzip -q /tmp/sonar-scanner.zip -d /tmp >> "$LOG_FILE" 2>&1 || true
-            export PATH="/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+            echo "[SONAR] tool_missing: sonar-scanner is unavailable on runner." >> "$LOG_FILE"
+            EXIT_CODE=127
+            FAILURE_KIND="tool_missing"
+          else
+            DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
+            DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
+            CMD="${{SONAR_COMMAND:-$DEFAULT_CMD}}"
+            echo "[SONAR] Running command: $CMD" >> "$LOG_FILE"
+            bash -lc "$CMD" > "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            if [[ $EXIT_CODE -ne 0 ]]; then
+              FAILURE_KIND="quality_failure"
+              echo "[SONAR] quality_failure: command exited with code $EXIT_CODE." >> "$LOG_FILE"
+            fi
           fi
-          DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
-          DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
-          CMD="${{SONAR_COMMAND:-$DEFAULT_CMD}}"
-          bash -lc "$CMD" > "$LOG_FILE" 2>&1
-          EXIT_CODE=$?
           END_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           if [[ $EXIT_CODE -eq 0 ]]; then STATUS="success"; else STATUS="failed"; fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          echo "failure_kind=$FAILURE_KIND" >> "$GITHUB_OUTPUT"
           echo "started_at=$START_TIME" >> "$GITHUB_OUTPUT"
           echo "ended_at=$END_TIME" >> "$GITHUB_OUTPUT"
 
@@ -551,6 +606,7 @@ jobs:
             echo "Pipeline End: $PIPELINE_END_TIME"
             echo
             echo "FOSSA: ${{{{ steps.fossa.outputs.status }}}} (exit=${{{{ steps.fossa.outputs.exit_code }}}})"
+            echo "FOSSA Failure Kind: ${{{{ steps.fossa.outputs.failure_kind }}}}"
             echo "FOSSA Start: ${{{{ steps.fossa.outputs.started_at }}}}"
             echo "FOSSA End: ${{{{ steps.fossa.outputs.ended_at }}}}"
             echo
@@ -559,6 +615,7 @@ jobs:
             echo "Pyscode End: ${{{{ steps.pyscode.outputs.ended_at }}}}"
             echo
             echo "Sonar: ${{{{ steps.sonar.outputs.status }}}} (exit=${{{{ steps.sonar.outputs.exit_code }}}})"
+            echo "Sonar Failure Kind: ${{{{ steps.sonar.outputs.failure_kind }}}}"
             echo "Sonar Start: ${{{{ steps.sonar.outputs.started_at }}}}"
             echo "Sonar End: ${{{{ steps.sonar.outputs.ended_at }}}}"
             echo

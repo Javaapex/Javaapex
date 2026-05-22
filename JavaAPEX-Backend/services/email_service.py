@@ -12,7 +12,7 @@ from jinja2 import Template
 class EmailService:
     def __init__(self):
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_port = int(os.getenv("SMTP_PORT", "465"))
         self.smtp_user = os.getenv("SMTP_USER", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         self.email_from = os.getenv("EMAIL_FROM", "migration-bot@example.com")

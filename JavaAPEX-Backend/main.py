@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import uuid
+import asyncio
 import os
 import sys
 import json
@@ -16,6 +17,7 @@ import re
 import html as _html
 import logging
 import shutil
+import httpx
 from datetime import datetime, timezone
 from github import GithubException
 from urllib.parse import urlparse
@@ -529,6 +531,8 @@ class MigrationResult(BaseModel):
     file_diffs: List[FileDiffEntry] = []
     extra_metadata: Optional[Dict[str, Any]] = None
     render_deployment: Optional[Dict[str, Any]] = None
+    pipeline_checks: Optional[Dict[str, Any]] = None
+    render_service_url: Optional[str] = None
 
 
 FINISHED_MIGRATION_JOB_TTL_SECONDS = _parse_positive_int_env("MIGRATION_JOB_FINISHED_TTL_SECONDS", 7 * 24 * 60 * 60)
@@ -550,6 +554,56 @@ migration_jobs: PersistentJobStore[MigrationResult] = PersistentJobStore(
     namespace=os.environ.get("MIGRATION_JOB_STORE_NAMESPACE", "migration"),
     ttl_for_value=_migration_job_ttl,
 )
+# In-memory token cache by job id for polling workflow status without exposing token to frontend payloads.
+JOB_GITHUB_TOKENS: Dict[str, str] = {}
+
+
+def _is_terminal_pipeline_status(status: Optional[str]) -> bool:
+    normalized = (status or "").strip().lower()
+    return normalized in {"success", "failed"}
+
+
+def _has_real_render_service_url(value: Optional[str]) -> bool:
+    url = (value or "").strip().lower()
+    return bool(url) and "onrender.com" in url and "dashboard.render.com/services" not in url
+
+
+def _normalize_repo_identifier(value: Optional[str]) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    raw = raw.removesuffix(".git").rstrip("/")
+    # Normalize GitHub URL/ref variants to owner/repo for robust matching.
+    if "github.com/" in raw:
+        raw = raw.split("github.com/", 1)[1]
+    if raw.startswith("git@github.com:"):
+        raw = raw.split("git@github.com:", 1)[1]
+    if raw.startswith("www.github.com/"):
+        raw = raw.split("www.github.com/", 1)[1]
+    return raw
+
+
+def _derive_onrender_url_from_target_repo(target_repo: Optional[str]) -> Optional[str]:
+    normalized = _normalize_repo_identifier(target_repo)
+    if not normalized or "/" not in normalized:
+        return None
+    repo_name = normalized.split("/")[-1].strip().lower()
+    repo_name = re.sub(r"[^a-z0-9-]", "-", repo_name)
+    repo_name = re.sub(r"-+", "-", repo_name).strip("-")
+    if not repo_name:
+        return None
+    return f"https://{repo_name}.onrender.com"
+
+
+def _is_cicd_ready_for_result(job: "MigrationResult") -> bool:
+    checks = job.pipeline_checks or {}
+    required = ["fossa", "pyscode", "sonar", "render"]
+    for key in required:
+        check_status = ((checks.get(key) or {}).get("status") or "pending")
+        if not _is_terminal_pipeline_status(check_status):
+            return False
+
+    return True
 
 
 class RepoInfo(BaseModel):
@@ -2194,7 +2248,175 @@ async def get_migration_status(job_id: str):
     """Get the status of a migration job"""
     if job_id not in migration_jobs:
         raise_missing_migration_job(job_id)
-    return migration_jobs[job_id]
+    job = migration_jobs[job_id]
+
+    render_info = job.render_deployment or {}
+    render_service_url = (
+        render_info.get("accessible_url")
+        or render_info.get("service_url")
+        or render_info.get("url")
+        or render_info.get("dashboard_url")
+    )
+    if render_service_url and str(render_service_url).strip().lower() != "https://dashboard.render.com/services":
+        job.render_service_url = str(render_service_url)
+
+    derived_repo_render_url = _derive_onrender_url_from_target_repo(job.target_repo)
+    if (
+        derived_repo_render_url
+        and (
+            not job.render_service_url
+            or "github.com/" in str(job.render_service_url).lower()
+            or "/actions/runs/" in str(job.render_service_url).lower()
+        )
+    ):
+        # User-requested fallback: always expose repo-name based Render URL instead
+        # of GitHub Actions links when Render URL cannot be resolved directly.
+        job.render_service_url = derived_repo_render_url
+
+    # Prefer actual Render service URL (onrender.com) when available.
+    needs_render_resolution = (
+        bool(job.target_repo)
+        and (
+            not job.render_service_url
+            or "dashboard.render.com/services" in str(job.render_service_url)
+        )
+    )
+    render_api_key = (os.getenv("RENDER_API_KEY", "") or "").strip()
+    if needs_render_resolution and render_api_key:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        meta = job.extra_metadata or {}
+        render_meta = meta.get("render_lookup") if isinstance(meta.get("render_lookup"), dict) else {}
+        last_fetch_ts = float(render_meta.get("fetched_at_ts", 0) or 0)
+        should_refresh = (now_ts - last_fetch_ts) >= 30
+        services_payload = render_meta.get("services") if isinstance(render_meta, dict) else None
+
+        if should_refresh:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {render_api_key}",
+                    "Accept": "application/json",
+                }
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get("https://api.render.com/v1/services", headers=headers)
+                    resp.raise_for_status()
+                    services_payload = resp.json()
+                meta["render_lookup"] = {
+                    "fetched_at_ts": now_ts,
+                    "services": services_payload,
+                }
+                job.extra_metadata = meta
+            except Exception as exc:
+                logger.debug("Render service lookup failed for job %s: %s", job_id, exc)
+
+        services = services_payload or []
+        target_repo_normalized = _normalize_repo_identifier(job.target_repo)
+        matched_service = None
+        for svc in services if isinstance(services, list) else []:
+            repo_ref = _normalize_repo_identifier(svc.get("repo"))
+            if repo_ref and repo_ref == target_repo_normalized:
+                matched_service = svc
+                break
+
+        if matched_service:
+            service_url = (
+                matched_service.get("url")
+                or (matched_service.get("service") or {}).get("url")
+                or ((matched_service.get("service") or {}).get("serviceDetails") or {}).get("url")
+            )
+            service_id = matched_service.get("id") or (matched_service.get("service") or {}).get("id")
+            service_name = (
+                matched_service.get("name")
+                or (matched_service.get("service") or {}).get("name")
+                or ""
+            )
+            service_type = (
+                matched_service.get("type")
+                or (matched_service.get("service") or {}).get("type")
+                or ""
+            )
+            if service_url:
+                job.render_service_url = str(service_url)
+            elif service_name and str(service_type).lower() == "web_service":
+                # Failed deploys can still have a stable service subdomain even when
+                # the service URL field is missing in some API responses.
+                job.render_service_url = f"https://{service_name}.onrender.com"
+            elif service_id:
+                # Service-specific dashboard URL is better than a generic dashboard root.
+                job.render_service_url = f"https://dashboard.render.com/services/{service_id}"
+
+    sonar_status = "pending"
+    if job.sonar_error_message:
+        sonar_status = "failed"
+    elif (job.sonar_quality_gate or "").upper() == "PASSED":
+        sonar_status = "success"
+    elif job.sonar_quality_gate:
+        sonar_status = "failed"
+
+    fossa_status = "pending"
+    if job.fossa_error_message:
+        fossa_status = "failed"
+    elif (job.fossa_policy_status or "").upper() in {"PASS", "PASSED", "SUCCESS", "COMPLIANT"}:
+        fossa_status = "success"
+    elif job.fossa_policy_status:
+        fossa_status = "failed"
+
+    # CYCODE/Pyscode currently runs in generated GitHub Actions workflow, not backend pipeline.
+    pyscode_status = "pending"
+
+    pipeline_checks = {
+        "fossa": {"status": fossa_status, "label": job.fossa_policy_status or "N/A"},
+        "pyscode": {"status": pyscode_status, "label": "Workflow check"},
+        "sonar": {"status": sonar_status, "label": job.sonar_quality_gate or "N/A"},
+        "render": {"status": "pending", "label": "Waiting for deployment"},
+    }
+    job.pipeline_checks = pipeline_checks
+
+    # If we have target repo + token, enrich checks from latest GitHub Actions run.
+    status_token = JOB_GITHUB_TOKENS.get(job_id) or DEFAULT_GITHUB_TOKEN
+    if job.target_repo and status_token:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        meta = job.extra_metadata or {}
+        workflow_meta = meta.get("workflow_checks") if isinstance(meta.get("workflow_checks"), dict) else {}
+        last_fetch_ts = float(workflow_meta.get("fetched_at_ts", 0) or 0)
+        should_refresh = (now_ts - last_fetch_ts) >= 20
+
+        actions_payload = workflow_meta.get("payload") if isinstance(workflow_meta, dict) else {}
+        if should_refresh:
+            actions_payload = await github_service.get_latest_render_pipeline_status(
+                token=status_token,
+                repo_url=job.target_repo,
+            )
+            workflow_meta = {
+                "fetched_at_ts": now_ts,
+                "payload": actions_payload or {},
+            }
+            meta["workflow_checks"] = workflow_meta
+            job.extra_metadata = meta
+
+        if isinstance(actions_payload, dict) and actions_payload.get("checks"):
+            job.pipeline_checks = actions_payload.get("checks")
+            if not job.render_service_url:
+                actions_render_url = str(actions_payload.get("render_service_url") or "").strip()
+                if actions_render_url:
+                    job.render_service_url = actions_render_url
+            render_status = str((job.pipeline_checks or {}).get("render", {}).get("status") or "").strip().lower()
+            if not job.render_service_url and render_status != "success":
+                actions_run_url = str(actions_payload.get("run_url") or "").strip()
+                if actions_run_url:
+                    job.render_service_url = actions_run_url
+
+    # Final override to avoid returning GitHub Actions URL in the Render Service field.
+    if (
+        derived_repo_render_url
+        and job.render_service_url
+        and (
+            "github.com/" in str(job.render_service_url).lower()
+            or "/actions/runs/" in str(job.render_service_url).lower()
+        )
+    ):
+        job.render_service_url = derived_repo_render_url
+
+    return job
 
 
 @app.get("/api/migration/{job_id}/fossa")
@@ -8561,6 +8783,8 @@ async def run_migration(job_id: str, request: MigrationRequest):
 
         # Use user token or fall back to default token
         github_token = _effective_github_token(token=request.token or "", github_token=request.github_token or "")
+        if github_token:
+            JOB_GITHUB_TOKENS[job_id] = github_token
         using_user_token = bool(_first_nonempty_token(request.github_token or "", request.token or ""))
         add_log(job_id, f"Using GitHub token: {'user-provided' if using_user_token else 'default'}")
 
@@ -8598,7 +8822,6 @@ async def run_migration(job_id: str, request: MigrationRequest):
             render_result = {
                 "status": "queued_via_github_actions",
                 "reason": "Deployment is configured to run via .github/workflows/render-deploy.yml on push.",
-                "dashboard_url": "https://dashboard.render.com/services",
                 "errors": [],
             }
             job.render_deployment = render_result
@@ -8622,6 +8845,65 @@ async def run_migration(job_id: str, request: MigrationRequest):
             if render_result.get("errors"):
                 for err in (render_result.get("errors") or [])[:3]:
                     add_log(job_id, f"Render deployment error detail: {str(err)[:500]}")
+
+        # Step 6c: Wait for CI/CD checks + Render deployment to finish before finalizing.
+        if request.platform == GitPlatform.GITHUB and not _is_local_project_reference(request.source_repo_url):
+            status_token = JOB_GITHUB_TOKENS.get(job_id) or DEFAULT_GITHUB_TOKEN
+            if not (status_token or "").strip():
+                raise RuntimeError(
+                    "GitHub token is required to monitor CI/CD checks after push. "
+                    "Set github_token/token in the request or configure DEFAULT_GITHUB_TOKEN on the backend."
+                )
+            wait_timeout_seconds = _parse_positive_int_env("CICD_WAIT_TIMEOUT_SECONDS", 45 * 60) or (45 * 60)
+            poll_interval_seconds = _parse_positive_int_env("CICD_WAIT_POLL_SECONDS", 15) or 15
+            started_wait_ts = datetime.now(timezone.utc).timestamp()
+            update_job(job_id, MigrationStatus.PUSHING, 95, "Waiting for GitHub Actions checks and Render deployment to complete...")
+
+            while True:
+                refreshed_job = await get_migration_status(job_id)
+                elapsed_seconds = int(datetime.now(timezone.utc).timestamp() - started_wait_ts)
+
+                if _is_cicd_ready_for_result(refreshed_job):
+                    checks = refreshed_job.pipeline_checks or {}
+                    add_log(
+                        job_id,
+                        "CI/CD checks completed: "
+                        f"FOSSA={((checks.get('fossa') or {}).get('status') or 'pending')} "
+                        f"PYSCODE={((checks.get('pyscode') or {}).get('status') or 'pending')} "
+                        f"SONAR={((checks.get('sonar') or {}).get('status') or 'pending')} "
+                        f"RENDER={((checks.get('render') or {}).get('status') or 'pending')}"
+                    )
+                    if refreshed_job.render_service_url:
+                        add_log(job_id, f"Resolved Render service URL: {refreshed_job.render_service_url}")
+                    break
+
+                if elapsed_seconds >= wait_timeout_seconds:
+                    checks = refreshed_job.pipeline_checks or {}
+                    raise RuntimeError(
+                        "Timed out waiting for CI/CD completion. "
+                        f"Current statuses: "
+                        f"FOSSA={((checks.get('fossa') or {}).get('status') or 'pending')}, "
+                        f"PYSCODE={((checks.get('pyscode') or {}).get('status') or 'pending')}, "
+                        f"SONAR={((checks.get('sonar') or {}).get('status') or 'pending')}, "
+                        f"RENDER={((checks.get('render') or {}).get('status') or 'pending')}, "
+                        f"RENDER_URL={refreshed_job.render_service_url or 'N/A'}"
+                    )
+
+                if elapsed_seconds % 60 == 0:
+                    checks = refreshed_job.pipeline_checks or {}
+                    update_job(
+                        job_id,
+                        MigrationStatus.PUSHING,
+                        95,
+                        "Waiting for CI/CD completion... "
+                        f"FOSSA={((checks.get('fossa') or {}).get('status') or 'pending').upper()}, "
+                        f"PYSCODE={((checks.get('pyscode') or {}).get('status') or 'pending').upper()}, "
+                        f"SONAR={((checks.get('sonar') or {}).get('status') or 'pending').upper()}, "
+                        f"RENDER={((checks.get('render') or {}).get('status') or 'pending').upper()} "
+                        f"({elapsed_seconds}s)"
+                    )
+
+                await asyncio.sleep(max(5, poll_interval_seconds))
 
         job.file_diffs = migration_file_diffs
         

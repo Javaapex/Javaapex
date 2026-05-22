@@ -4279,23 +4279,48 @@ return `${seconds}s`;
     targetVersions.length,
   ]);
 
+  const isPendingCheckStatus = (value?: string | null) => {
+    const normalized = (value || "").trim().toLowerCase();
+    return !normalized || normalized === "pending" || normalized === "queued" || normalized === "in_progress";
+  };
+
+  const shouldWaitForPipelineCompletion = (job: MigrationResult | null | undefined) => {
+    if (!job || job.status !== "completed") {
+      return false;
+    }
+    const fossaPending = isPendingCheckStatus(job.pipeline_checks?.fossa?.status);
+    const pyscodePending = isPendingCheckStatus(job.pipeline_checks?.pyscode?.status);
+    const sonarPending = isPendingCheckStatus(job.pipeline_checks?.sonar?.status);
+    const renderPending = isPendingCheckStatus(job.pipeline_checks?.render?.status);
+    return fossaPending || pyscodePending || sonarPending || renderPending;
+  };
+
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     let lastUpdateTime = Date.now();
     let stuckCheckInterval: ReturnType<typeof setInterval>;
-    
-    if (step >= 5 && migrationJob?.status && migrationJob.status !== "completed" && migrationJob.status !== "failed") {
+
+    const shouldPoll =
+      Boolean(migrationJob?.job_id) &&
+      (
+        (step >= 5 && migrationJob?.status && migrationJob.status !== "completed" && migrationJob.status !== "failed")
+        || (step === 7 && shouldWaitForPipelineCompletion(migrationJob))
+      );
+
+    if (shouldPoll) {
       interval = setInterval(() => {
         getMigrationStatus(migrationJob!.job_id)
           .then((job) => {
             setMigrationJob(job);
             lastUpdateTime = Date.now();
-          
-            if (job.status === "completed") {
-            setMigrationJob(job);
-            setStep(7);
-            getMigrationLogs(job.job_id).then((logs) => setMigrationLogs(logs.logs || []));
-          }
+
+            if (job.status === "completed" && !shouldWaitForPipelineCompletion(job)) {
+              setMigrationJob(job);
+              setStep(7);
+              getMigrationLogs(job.job_id).then((logs) => setMigrationLogs(logs.logs || []));
+            } else if (job.status === "completed" && step !== 7) {
+              setStep(7);
+            }
 
             // Auto-advance to report when completed
             // if (job.status === "completed") {
@@ -4343,7 +4368,7 @@ return `${seconds}s`;
             }
             setError("Failed to fetch migration status.");
           });
-      }, 500/*2000*/);
+      }, 1500);
       
       // Check if migration appears to be stuck (same status for > 30 seconds)
       stuckCheckInterval = setInterval(() => {
@@ -4358,7 +4383,7 @@ return `${seconds}s`;
       if (interval) clearInterval(interval);
       if (stuckCheckInterval) clearInterval(stuckCheckInterval);
     };
-    }, [step, migrationJob?.job_id, migrationJob?.status]);
+    }, [step, migrationJob?.job_id, migrationJob?.status, migrationJob?.render_service_url, migrationJob?.pipeline_checks]);
       useEffect(() => {
       if ((step === 5 || step === 6) && migrationJob?.status === "completed") {
         setStep(7);
@@ -10013,6 +10038,57 @@ return `${seconds}s`;
               <div style={styles.reportItem}>
                 <span style={styles.reportLabel}>Migration Completed</span>
                 <span style={styles.reportValue}>{migrationJob.completed_at ? new Date(migrationJob.completed_at).toLocaleString() : "In Progress"}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Pipeline Checks and Deployment */}
+          <div style={styles.reportSection}>
+            <h3 style={styles.reportTitle}>🚦 Pipeline & Deployment</h3>
+            <div style={styles.reportGrid}>
+              <div style={styles.reportItem}>
+                <span style={styles.reportLabel}>FOSSA Check</span>
+                <span style={styles.reportValue}>
+                  {(migrationJob.pipeline_checks?.fossa?.status || "pending").toUpperCase()}
+                  {" "}
+                  ({migrationJob.pipeline_checks?.fossa?.label || "N/A"})
+                </span>
+              </div>
+              <div style={styles.reportItem}>
+                <span style={styles.reportLabel}>CYCODE Check</span>
+                <span style={styles.reportValue}>
+                  {(migrationJob.pipeline_checks?.pyscode?.status || "pending").toUpperCase()}
+                  {" "}
+                  ({migrationJob.pipeline_checks?.pyscode?.label || "N/A"})
+                </span>
+              </div>
+              <div style={styles.reportItem}>
+                <span style={styles.reportLabel}>Sonar Check</span>
+                <span style={styles.reportValue}>
+                  {(migrationJob.pipeline_checks?.sonar?.status || "pending").toUpperCase()}
+                  {" "}
+                  ({migrationJob.pipeline_checks?.sonar?.label || "N/A"})
+                </span>
+              </div>
+              <div style={styles.reportItem}>
+                <span style={styles.reportLabel}>Render Deployment</span>
+                <span style={styles.reportValue}>
+                  {(migrationJob.pipeline_checks?.render?.status || "pending").toUpperCase()}
+                  {" "}
+                  ({migrationJob.pipeline_checks?.render?.label || "N/A"})
+                </span>
+              </div>
+              <div style={styles.reportItem}>
+                <span style={styles.reportLabel}>Render Service</span>
+                <span style={styles.reportValue}>
+                  {migrationJob.render_service_url ? (
+                    <a href={migrationJob.render_service_url} target="_blank" rel="noopener noreferrer" style={{ color: '#16a34a', textDecoration: 'none' }}>
+                      {migrationJob.render_service_url}
+                    </a>
+                  ) : (
+                    "N/A"
+                  )}
+                </span>
               </div>
             </div>
           </div>

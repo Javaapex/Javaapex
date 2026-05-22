@@ -418,6 +418,13 @@ export interface MigrationResult {
   total_warnings: number;
   errors_fixed: number;
   warnings_fixed: number;
+  pipeline_checks?: {
+    fossa?: { status?: string; label?: string };
+    pyscode?: { status?: string; label?: string };
+    sonar?: { status?: string; label?: string };
+    render?: { status?: string; label?: string };
+  } | null;
+  render_service_url?: string | null;
 }
 
 export interface RepoAnalysis {

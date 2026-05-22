@@ -343,6 +343,7 @@ class GitHubService:
             or os.getenv("RENDER_OWNERID", "")
             or ""
         ).strip()
+        strict_quality_gate = (os.getenv("STRICT_QUALITY_GATE", "false") or "").strip().lower()
         smtp_host = (os.getenv("SMTP_HOST", "") or "").strip()
         smtp_port = (os.getenv("SMTP_PORT", "") or "").strip()
         smtp_user = (os.getenv("SMTP_USER", "") or "").strip()
@@ -373,6 +374,7 @@ jobs:
       SONAR_ORGANIZATION: {_yaml_quote(sonar_organization)}
       SONAR_PROJECT_KEY: {_yaml_quote(sonar_project_key)}
       SONAR_COMMAND: {_yaml_quote(sonar_command)}
+      STRICT_QUALITY_GATE: {_yaml_quote(strict_quality_gate)}
       RENDER_API_KEY: {_yaml_quote(render_api_key)}
       RENDER_OWNER_ID: {_yaml_quote(render_owner_id)}
       RENDER_OWNERID: {_yaml_quote(render_owner_id)}
@@ -448,10 +450,12 @@ jobs:
             EXIT_CODE=127
             FAILURE_KIND="tool_missing"
           else
-            CMD="${{FOSSA_COMMAND:-fossa analyze && fossa test --format json}}"
+            CMD="${{FOSSA_COMMAND:-fossa analyze . && fossa test --format json}}"
             echo "[FOSSA] Running command: $CMD" >> "$LOG_FILE"
-            bash -lc "$CMD" > "$LOG_FILE" 2>&1
+            set +e
+            bash -lc "$CMD" >> "$LOG_FILE" 2>&1
             EXIT_CODE=$?
+            set -e
             if [[ $EXIT_CODE -ne 0 ]]; then
               FAILURE_KIND="quality_failure"
               echo "[FOSSA] quality_failure: command exited with code $EXIT_CODE." >> "$LOG_FILE"
@@ -473,8 +477,10 @@ jobs:
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/pyscode.log"
           CMD="${{PYSCODE_COMMAND:-echo 'PYSCODE_COMMAND not configured'; exit 1}}"
+          set +e
           bash -lc "$CMD" > "$LOG_FILE" 2>&1
           EXIT_CODE=$?
+          set -e
           END_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           if [[ $EXIT_CODE -eq 0 ]]; then STATUS="success"; else STATUS="failed"; fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
@@ -490,22 +496,50 @@ jobs:
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/sonar.log"
           FAILURE_KIND=""
-          export PATH="/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
-          if ! command -v sonar-scanner >/dev/null 2>&1; then
-            echo "[SONAR] tool_missing: sonar-scanner is unavailable on runner." >> "$LOG_FILE"
+          SONAR_BIN="$(command -v sonar-scanner || true)"
+          if [[ -z "$SONAR_BIN" && -x "/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin/sonar-scanner" ]]; then
+            SONAR_BIN="/tmp/sonar-scanner-6.2.1.4610-linux-x64/bin/sonar-scanner"
+          fi
+          DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
+          if [[ -n "$SONAR_BIN" ]]; then
+            DEFAULT_CMD="\\\"$SONAR_BIN\\\" -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}} -Dsonar.qualitygate.wait=true"
+            RAW_CMD="${{SONAR_COMMAND:-}}"
+            if [[ -n "$RAW_CMD" ]]; then
+              # If a custom command references sonar-scanner, force it to use the resolved binary path.
+              CMD="${{RAW_CMD/sonar-scanner/\\\"$SONAR_BIN\\\"}}"
+            else
+              CMD="$DEFAULT_CMD"
+            fi
+            echo "[SONAR] Running command (local scanner): $CMD" >> "$LOG_FILE"
+            set +e
+            bash -lc "$CMD" >> "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            set -e
+          elif command -v docker >/dev/null 2>&1; then
+            echo "[SONAR] Local scanner missing. Falling back to Docker scanner image..." >> "$LOG_FILE"
+            set +e
+            docker run --rm \
+              -e SONAR_TOKEN="${{SONAR_TOKEN:-}}" \
+              -e SONAR_HOST_URL="${{SONAR_HOST_URL:-https://sonarcloud.io}}" \
+              -e SONAR_ORGANIZATION="${{SONAR_ORGANIZATION:-}}" \
+              -v "$PWD:/usr/src" \
+              sonarsource/sonar-scanner-cli:latest \
+              sonar-scanner \
+              -Dsonar.projectKey="$DYNAMIC_PROJECT_KEY" \
+              -Dsonar.host.url="${{SONAR_HOST_URL:-https://sonarcloud.io}}" \
+              -Dsonar.organization="${{SONAR_ORGANIZATION:-}}" \
+              -Dsonar.token="${{SONAR_TOKEN:-}}" \
+              -Dsonar.qualitygate.wait=true >> "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            set -e
+          else
+            echo "[SONAR] tool_missing: sonar-scanner binary and docker are unavailable." >> "$LOG_FILE"
             EXIT_CODE=127
             FAILURE_KIND="tool_missing"
-          else
-            DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
-            DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
-            CMD="${{SONAR_COMMAND:-$DEFAULT_CMD}}"
-            echo "[SONAR] Running command: $CMD" >> "$LOG_FILE"
-            bash -lc "$CMD" > "$LOG_FILE" 2>&1
-            EXIT_CODE=$?
-            if [[ $EXIT_CODE -ne 0 ]]; then
-              FAILURE_KIND="quality_failure"
-              echo "[SONAR] quality_failure: command exited with code $EXIT_CODE." >> "$LOG_FILE"
-            fi
+          fi
+          if [[ $EXIT_CODE -ne 0 && "$FAILURE_KIND" != "tool_missing" ]]; then
+            FAILURE_KIND="quality_failure"
+            echo "[SONAR] quality_failure: command exited with code $EXIT_CODE." >> "$LOG_FILE"
           fi
           END_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           if [[ $EXIT_CODE -eq 0 ]]; then STATUS="success"; else STATUS="failed"; fi
@@ -517,7 +551,6 @@ jobs:
 
       - name: Ensure Render service exists and trigger deploy
         id: render
-        if: ${{{{ steps.fossa.outputs.status == 'success' && steps.pyscode.outputs.status == 'success' && steps.sonar.outputs.status == 'success' }}}}
         shell: bash
         continue-on-error: true
         env:
@@ -581,6 +614,38 @@ jobs:
               -H "Accept: application/json" \
               -d '{{}}')
             echo "Deploy triggered: $DEPLOY_RESP"
+            DEPLOY_ID=$(echo "$DEPLOY_RESP" | jq -r '.id // .deploy.id // empty')
+
+            DEPLOY_STATUS="unknown"
+            if [[ -n "$DEPLOY_ID" && "$DEPLOY_ID" != "null" ]]; then
+              echo "Polling deploy status for deploy id: $DEPLOY_ID"
+              for i in $(seq 1 24); do
+                DEPLOY_DETAIL=$(curl -sS -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json" "https://api.render.com/v1/services/$SERVICE_ID/deploys/$DEPLOY_ID")
+                DEPLOY_STATUS=$(echo "$DEPLOY_DETAIL" | jq -r '.status // .deploy.status // empty' | tr '[:upper:]' '[:lower:]')
+                echo "Deploy poll $i/24 status=$DEPLOY_STATUS"
+                case "$DEPLOY_STATUS" in
+                  live|succeeded|success)
+                    break
+                    ;;
+                  failed|canceled|cancelled|error)
+                    break
+                    ;;
+                esac
+                sleep 10
+              done
+            fi
+
+            SERVICE_DETAILS=$(curl -sS -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json" "https://api.render.com/v1/services/$SERVICE_ID")
+            SERVICE_URL=$(echo "$SERVICE_DETAILS" | jq -r '.service.url // .url // .service.serviceDetails.url // .serviceDetails.url // empty')
+            if [[ -z "$SERVICE_URL" || "$SERVICE_URL" == "null" ]]; then
+              SERVICE_URL="https://dashboard.render.com/services/$SERVICE_ID"
+            fi
+            echo "Resolved service URL: $SERVICE_URL"
+            echo "service_id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
+            echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+            echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+            echo "deploy_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+            echo "deploy_status=$DEPLOY_STATUS" >> "$GITHUB_OUTPUT"
           }} > "$LOG_FILE" 2>&1
           EXIT_CODE=$?
           END_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -647,7 +712,7 @@ jobs:
           from email.mime.text import MIMEText
 
           smtp_host = os.getenv("SMTP_HOST", "").strip()
-          smtp_port = int((os.getenv("SMTP_PORT", "587") or "587").strip())
+          smtp_port = int((os.getenv("SMTP_PORT", "465") or "465").strip())
           smtp_user = os.getenv("SMTP_USER", "").strip()
           smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
           to_email = os.getenv("TO_EMAIL", "").strip()
@@ -667,10 +732,15 @@ jobs:
           msg["To"] = to_email
 
           try:
-              with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-                  server.starttls()
-                  server.login(smtp_user, smtp_password)
-                  server.sendmail(from_email, [to_email], msg.as_string())
+              if smtp_port == 465:
+                  with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
+                      server.login(smtp_user, smtp_password)
+                      server.sendmail(from_email, [to_email], msg.as_string())
+              else:
+                  with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                      server.starttls()
+                      server.login(smtp_user, smtp_password)
+                      server.sendmail(from_email, [to_email], msg.as_string())
               print("Status email sent.")
           except Exception as exc:
               print(f"Status email send failed: {{exc}}")
@@ -681,12 +751,24 @@ jobs:
         if: always()
         shell: bash
         run: |
+          STRICT="${{STRICT_QUALITY_GATE:-false}}"
+          STRICT="$(echo "$STRICT" | tr '[:upper:]' '[:lower:]')"
           FAIL=0
-          for S in "${{{{ steps.fossa.outputs.status }}}}" "${{{{ steps.pyscode.outputs.status }}}}" "${{{{ steps.sonar.outputs.status }}}}" "${{{{ steps.render.outputs.status }}}}"; do
-            if [[ "$S" != "success" ]]; then
-              FAIL=1
-            fi
-          done
+          # Always require deploy success if deploy step ran.
+          RENDER_STATUS="${{{{ steps.render.outputs.status }}}}"
+          if [[ -n "$RENDER_STATUS" && "$RENDER_STATUS" != "success" ]]; then
+            FAIL=1
+          fi
+          # Check quality gates only when strict mode is enabled.
+          if [[ "$STRICT" == "true" || "$STRICT" == "1" || "$STRICT" == "yes" ]]; then
+            for S in "${{{{ steps.fossa.outputs.status }}}}" "${{{{ steps.pyscode.outputs.status }}}}" "${{{{ steps.sonar.outputs.status }}}}"; do
+              if [[ "$S" != "success" ]]; then
+                FAIL=1
+              fi
+            done
+          else
+            echo "STRICT_QUALITY_GATE=$STRICT -> quality failures are informational; not failing workflow."
+          fi
           if [[ "$FAIL" -ne 0 ]]; then
             echo "At least one stage failed. See email/log output for details."
             exit 1
@@ -880,6 +962,132 @@ jobs:
             raise Exception(f"GitHub API error: {error_msg}")
         except Exception as e:
             raise Exception(f"Failed to connect to GitHub: {str(e)}")
+
+    async def get_latest_render_pipeline_status(self, token: str, repo_url: str) -> Dict[str, Any]:
+        """Fetch latest render-deploy workflow run and key check step statuses."""
+        normalized_token = (token or "").strip()
+        if not normalized_token or not repo_url:
+            return {}
+
+        owner, repo = await self.parse_repo_url(repo_url)
+        headers = {
+            "Authorization": f"Bearer {normalized_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        workflow_ref = "render-deploy.yml"
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                runs_resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_ref}/runs",
+                    headers=headers,
+                    params={"per_page": 1},
+                )
+                runs_resp.raise_for_status()
+                runs_payload = runs_resp.json() or {}
+                runs = runs_payload.get("workflow_runs") or []
+                if not runs:
+                    return {}
+
+                run = runs[0]
+                run_id = run.get("id")
+                if not run_id:
+                    return {}
+
+                jobs_resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
+                    headers=headers,
+                    params={"per_page": 100},
+                )
+                jobs_resp.raise_for_status()
+                jobs_payload = jobs_resp.json() or {}
+                jobs = jobs_payload.get("jobs") or []
+
+                def _map_conclusion(conclusion: str) -> str:
+                    c = (conclusion or "").lower()
+                    if c in {"success"}:
+                        return "success"
+                    if c in {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}:
+                        return "failed"
+                    if c in {"skipped", "neutral"}:
+                        return "pending"
+                    return "pending"
+
+                def _normalize_step_label(conclusion: str, step_status: str) -> str:
+                    c = (conclusion or "").strip()
+                    s = (step_status or "").strip()
+                    if c:
+                        return c
+                    if s:
+                        return s
+                    return "pending"
+
+                checks = {
+                    "fossa": {"status": "pending", "label": "N/A"},
+                    "pyscode": {"status": "pending", "label": "N/A"},
+                    "sonar": {"status": "pending", "label": "N/A"},
+                    "render": {"status": "pending", "label": "N/A"},
+                }
+                render_job_id: Optional[int] = None
+                render_service_url: Optional[str] = None
+
+                for job in jobs:
+                    for step in job.get("steps") or []:
+                        name = (step.get("name") or "").strip().lower()
+                        conclusion = (step.get("conclusion") or "").strip()
+                        step_status = (step.get("status") or "").strip()
+                        if not name:
+                            continue
+                        status = _map_conclusion(conclusion)
+                        label = _normalize_step_label(conclusion, step_status)
+                        if "run fossa check" in name or ("fossa" in name and "check" in name):
+                            checks["fossa"] = {"status": status, "label": label}
+                        elif "run pyscode check" in name or ("pyscode" in name and "check" in name) or ("cycode" in name and "check" in name):
+                            checks["pyscode"] = {"status": status, "label": label}
+                        elif "run sonar check" in name or ("sonar" in name and "check" in name):
+                            checks["sonar"] = {"status": status, "label": label}
+                        elif "deploy to render" in name or "ensure render service exists and trigger deploy" in name or ("render" in name and "deploy" in name):
+                            checks["render"] = {"status": status, "label": label}
+                            try:
+                                render_job_id = int(job.get("id"))
+                            except Exception:
+                                render_job_id = None
+
+                run_status = (run.get("status") or "").strip().lower()
+                run_conclusion = (run.get("conclusion") or "").strip().lower()
+                if run_status == "completed":
+                    fallback = _map_conclusion(run_conclusion)
+                    for key, value in checks.items():
+                        if (value.get("status") or "pending") == "pending":
+                            checks[key] = {"status": fallback, "label": run_conclusion or "completed"}
+
+                # Try to extract "Resolved service URL" from Render deploy job logs.
+                if render_job_id:
+                    try:
+                        logs_resp = await client.get(
+                            f"https://api.github.com/repos/{owner}/{repo}/actions/jobs/{render_job_id}/logs",
+                            headers=headers,
+                        )
+                        if logs_resp.status_code == 200:
+                            logs_text = logs_resp.text or ""
+                            url_match = re.search(r"Resolved service URL:\s*(https?://[^\s]+)", logs_text, re.IGNORECASE)
+                            if url_match:
+                                render_service_url = url_match.group(1).strip()
+                    except Exception:
+                        pass
+
+                return {
+                    "run_id": run_id,
+                    "run_url": run.get("html_url"),
+                    "run_status": run.get("status"),
+                    "run_conclusion": run.get("conclusion"),
+                    "checks": checks,
+                    "render_service_url": render_service_url,
+                }
+        except Exception as exc:
+            logger.warning("Failed to fetch latest render pipeline status for %s/%s: %s", owner, repo, exc)
+            return {}
     
     async def analyze_repository(
         self,

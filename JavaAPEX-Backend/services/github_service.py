@@ -324,6 +324,32 @@ class GitHubService:
         os.makedirs(workflows_dir, exist_ok=True)
         render_service_type = self._detect_render_service_type(local_path)
         service_suffix = "-worker" if render_service_type == "background_worker" else ""
+        def _yaml_quote(value: str) -> str:
+            # Use YAML single-quoted scalars and escape embedded single quotes.
+            return "'" + (value or "").replace("'", "''") + "'"
+
+        # Hardcoded workflow configuration values (resolved at generation time).
+        fossa_api_key = (os.getenv("FOSSA_API_KEY", "") or "").strip()
+        fossa_command = (os.getenv("FOSSA_COMMAND", "") or "").strip()
+        pyscode_command = (os.getenv("PYSCODE_COMMAND", "") or "").strip()
+        sonar_token = (os.getenv("SONAR_TOKEN", "") or "").strip()
+        sonar_host_url = (os.getenv("SONAR_HOST_URL", "") or "").strip()
+        sonar_organization = (os.getenv("SONAR_ORGANIZATION", "") or "").strip()
+        sonar_project_key = (os.getenv("SONAR_PROJECT_KEY", "") or "").strip()
+        sonar_command = (os.getenv("SONAR_COMMAND", "") or "").strip()
+        render_api_key = (os.getenv("RENDER_API_KEY", "") or "").strip()
+        render_owner_id = (
+            os.getenv("RENDER_OWNER_ID", "")
+            or os.getenv("RENDER_OWNERID", "")
+            or ""
+        ).strip()
+        smtp_host = (os.getenv("SMTP_HOST", "") or "").strip()
+        smtp_port = (os.getenv("SMTP_PORT", "") or "").strip()
+        smtp_user = (os.getenv("SMTP_USER", "") or "").strip()
+        smtp_password = (os.getenv("SMTP_PASSWORD", "") or "").strip()
+        to_email = (os.getenv("TO_EMAIL", "") or "").strip()
+        from_email = (os.getenv("FROM_EMAIL", "") or "").strip()
+
         workflow = f"""name: Deploy To Render
 
 on:
@@ -338,6 +364,24 @@ permissions:
 jobs:
   deploy-and-checks:
     runs-on: ubuntu-latest
+    env:
+      FOSSA_API_KEY: {_yaml_quote(fossa_api_key)}
+      FOSSA_COMMAND: {_yaml_quote(fossa_command)}
+      PYSCODE_COMMAND: {_yaml_quote(pyscode_command)}
+      SONAR_TOKEN: {_yaml_quote(sonar_token)}
+      SONAR_HOST_URL: {_yaml_quote(sonar_host_url)}
+      SONAR_ORGANIZATION: {_yaml_quote(sonar_organization)}
+      SONAR_PROJECT_KEY: {_yaml_quote(sonar_project_key)}
+      SONAR_COMMAND: {_yaml_quote(sonar_command)}
+      RENDER_API_KEY: {_yaml_quote(render_api_key)}
+      RENDER_OWNER_ID: {_yaml_quote(render_owner_id)}
+      RENDER_OWNERID: {_yaml_quote(render_owner_id)}
+      SMTP_HOST: {_yaml_quote(smtp_host)}
+      SMTP_PORT: {_yaml_quote(smtp_port)}
+      SMTP_USER: {_yaml_quote(smtp_user)}
+      SMTP_PASSWORD: {_yaml_quote(smtp_password)}
+      TO_EMAIL: {_yaml_quote(to_email)}
+      FROM_EMAIL: {_yaml_quote(from_email)}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -355,32 +399,10 @@ jobs:
           echo "pipeline_start_time=$NOW_UTC" >> "$GITHUB_OUTPUT"
           mkdir -p .ci-logs
 
-      - name: Wait for controller sync
-        shell: bash
-        env:
-          GH_TOKEN: ${{{{ github.token }}}}
-        run: |
-          set -euo pipefail
-          REPO="${{{{ github.repository }}}}"
-          for i in $(seq 1 24); do
-            READY="$(gh api "repos/$REPO/actions/variables/SYNC_READY" --jq '.value' 2>/dev/null || true)"
-            if [[ "$READY" == "true" ]]; then
-              echo "SYNC_READY=true detected."
-              exit 0
-            fi
-            echo "Waiting for controller to provision vars/secrets... attempt $i/24"
-            sleep 15
-          done
-          echo "Timed out waiting for SYNC_READY=true. Re-run this workflow after controller sync."
-          exit 1
-
       - name: Run FOSSA check
         id: fossa
         shell: bash
         continue-on-error: true
-        env:
-          FOSSA_API_KEY: ${{{{ secrets.FOSSA_API_KEY }}}}
-          FOSSA_COMMAND: ${{{{ vars.FOSSA_COMMAND }}}}
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/fossa.log"
@@ -398,8 +420,6 @@ jobs:
         id: pyscode
         shell: bash
         continue-on-error: true
-        env:
-          PYSCODE_COMMAND: ${{{{ vars.PYSCODE_COMMAND }}}}
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/pyscode.log"
@@ -417,16 +437,11 @@ jobs:
         id: sonar
         shell: bash
         continue-on-error: true
-        env:
-          SONAR_TOKEN: ${{{{ secrets.SONAR_TOKEN }}}}
-          SONAR_HOST_URL: ${{{{ vars.SONAR_HOST_URL }}}}
-          SONAR_ORGANIZATION: ${{{{ vars.SONAR_ORGANIZATION }}}}
-          SONAR_PROJECT_KEY: ${{{{ vars.SONAR_PROJECT_KEY }}}}
-          SONAR_COMMAND: ${{{{ vars.SONAR_COMMAND }}}}
         run: |
           START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           LOG_FILE=".ci-logs/sonar.log"
-          DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY##*/}}}} -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
+          DYNAMIC_PROJECT_KEY="${{SONAR_PROJECT_KEY:-${{GITHUB_REPOSITORY//\\//_}}}}"
+          DEFAULT_CMD="sonar-scanner -Dsonar.projectKey=$DYNAMIC_PROJECT_KEY -Dsonar.host.url=${{SONAR_HOST_URL:-https://sonarcloud.io}} -Dsonar.organization=${{SONAR_ORGANIZATION:-}} -Dsonar.token=${{SONAR_TOKEN:-}}"
           CMD="${{SONAR_COMMAND:-$DEFAULT_CMD}}"
           bash -lc "$CMD" > "$LOG_FILE" 2>&1
           EXIT_CODE=$?
@@ -443,11 +458,6 @@ jobs:
         shell: bash
         continue-on-error: true
         env:
-          RENDER_API_KEY: ${{{{ secrets.RENDER_API_KEY }}}}
-          RENDER_API_KEY_VAR: ${{{{ vars.RENDER_API_KEY }}}}
-          RENDER_OWNER_ID: ${{{{ secrets.RENDER_OWNER_ID }}}}
-          RENDER_OWNER_ID_VAR: ${{{{ vars.RENDER_OWNER_ID }}}}
-          RENDER_OWNERID: ${{{{ secrets.RENDER_OWNERID }}}}
           REPO_NAME: ${{{{ steps.meta.outputs.repo_name }}}}
           BRANCH: ${{{{ steps.meta.outputs.branch }}}}
           REPO_URL: https://github.com/${{{{ github.repository }}}}
@@ -457,10 +467,10 @@ jobs:
           set +e
           {{
             set -euo pipefail
-            RENDER_API_KEY="${{RENDER_API_KEY:-${{RENDER_API_KEY_VAR:-}}}}"
-            RENDER_OWNER_ID="${{RENDER_OWNER_ID:-${{RENDER_OWNER_ID_VAR:-${{RENDER_OWNERID:-}}}}}}"
+            RENDER_API_KEY="${{RENDER_API_KEY:-}}"
+            RENDER_OWNER_ID="${{RENDER_OWNER_ID:-${{RENDER_OWNERID:-}}}}"
             if [[ -z "$RENDER_API_KEY" ]]; then
-              echo "Missing Render API key. Configure one of: secret RENDER_API_KEY or variable RENDER_API_KEY."
+              echo "Missing Render API key. Configure RENDER_API_KEY in the workflow env block."
               exit 1
             fi
 
@@ -470,7 +480,7 @@ jobs:
             fi
 
             if [[ -z "$RENDER_OWNER_ID" ]]; then
-              echo "Unable to resolve Render owner. Configure one of: secret RENDER_OWNER_ID, secret RENDER_OWNERID, or variable RENDER_OWNER_ID."
+              echo "Unable to resolve Render owner. Configure RENDER_OWNER_ID/RENDER_OWNERID in workflow env or ensure API key can list owners."
               exit 1
             fi
 
@@ -563,13 +573,6 @@ jobs:
 
       - name: Send status email
         if: always()
-        env:
-          SMTP_HOST: ${{{{ secrets.SMTP_HOST }}}}
-          SMTP_PORT: ${{{{ secrets.SMTP_PORT }}}}
-          SMTP_USER: ${{{{ secrets.SMTP_USER }}}}
-          SMTP_PASSWORD: ${{{{ secrets.SMTP_PASSWORD }}}}
-          TO_EMAIL: ${{{{ secrets.TO_EMAIL }}}}
-          FROM_EMAIL: ${{{{ secrets.FROM_EMAIL }}}}
         shell: bash
         run: |
           python3 - <<'PY'

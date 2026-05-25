@@ -1588,12 +1588,33 @@ class ApplicationTest {{
                 ('new Byte(', 'Byte.valueOf(', 'Deprecated Byte constructor'),
                 ('new Short(', 'Short.valueOf(', 'Deprecated Short constructor'),
                 ('new Character(', 'Character.valueOf(', 'Deprecated Character constructor'),
-                # Reflection (deprecated since Java 9)
-                ('.newInstance()', '.getDeclaredConstructor().newInstance()', 'Deprecated Class.newInstance()'),
                 # Runtime.exec with single string (deprecated)
                 # Date/Time (old APIs)
                 ('new Date().getTime()', 'System.currentTimeMillis()', 'Use System.currentTimeMillis()'),
             ]
+
+            # Reflection: only migrate known Class#newInstance patterns.
+            # Do not rewrite generic *.newInstance() calls because many APIs
+            # (for example SOAP/XML factories) expose valid static newInstance().
+            reflection_patterns = [
+                (
+                    re.compile(r'(\b[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*\.class)\.newInstance\(\)'),
+                    r'\1.getDeclaredConstructor().newInstance()',
+                    'Deprecated Class.newInstance() on class literal',
+                ),
+                (
+                    re.compile(r'(Class\.forName\s*\([^)]*\))\.newInstance\(\)'),
+                    r'\1.getDeclaredConstructor().newInstance()',
+                    'Deprecated Class.newInstance() on Class.forName',
+                ),
+            ]
+
+            for pattern, replacement, desc in reflection_patterns:
+                matches = list(pattern.finditer(content))
+                if matches:
+                    content = pattern.sub(replacement, content)
+                    fixes += len(matches)
+                    changes.append(f"{desc}: {len(matches)} occurrences")
 
             # Track detailed changes with line numbers
             lines = content.split('\n')
@@ -1601,9 +1622,7 @@ class ApplicationTest {{
             for old, new, desc in deprecated_apis:
                 if old in content:
                     # Apply the replacement with migration comments
-                    if old == '.newInstance()':
-                        content = content.replace(old, new)
-                    elif 'new Integer(' in old or 'new Long(' in old or 'new Double(' in old or 'new Boolean(' in old:
+                    if 'new Integer(' in old or 'new Long(' in old or 'new Double(' in old or 'new Boolean(' in old:
                         content = content.replace(old, new)
                     else:
                         content = content.replace(old, new)

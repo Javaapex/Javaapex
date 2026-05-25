@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     unzip \
     default-jdk-headless \
+ && mvn --version \
  && rm -rf /var/lib/apt/lists/*
 
 # Install FOSSA CLI during image build so Render runtime has it available on PATH.
@@ -48,5 +49,8 @@ ENV UVICORN_MAX_REQUEST_SIZE=1500MB
 ENV UVICORN_MAX_REQUESTS=1000
 ENV UVICORN_TIMEOUT_KEEP_ALIVE=300
 ENV UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=30
+ENV MIGRATOR_MAVEN_CMD=/usr/bin/mvn
+ENV MIGRATOR_REQUIRE_MAVEN_PREFLIGHT=true
+ENV MIGRATOR_PREFLIGHT_USE_DOCKER=false
 
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --limit-concurrency 10 --limit-max-requests 1000 --timeout-keep-alive 300 --timeout-graceful-shutdown 30 --h11-max-incomplete-event-size 1073741824"]

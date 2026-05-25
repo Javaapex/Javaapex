@@ -26,12 +26,14 @@ The API is written in FastAPI, but parts of the migration pipeline also rely on 
 - API root: `/`
 - Interactive docs: `/docs`
 - The container listens on Render's injected `PORT` automatically.
+- Maven preflight is enforced by default (`MIGRATOR_REQUIRE_MAVEN_PREFLIGHT=true`) and uses `/usr/bin/mvn` inside the Docker image.
 
 ## Important Notes
 
 - `WORK_DIR` is set to `/tmp/migrations`, which works with Render's ephemeral filesystem.
 - Repository discovery now uses a clone-first flow backed by managed workspaces under `WORK_DIR/repo_workspaces`.
 - Optional tuning env vars for large repositories: `REPO_WORKSPACE_TTL_SEC`, `REPO_CLONE_TIMEOUT_SEC`, `REPO_ANALYSIS_MAX_JAVA_FILES`, `REPO_ANALYSIS_MAX_ENDPOINT_FILES`, and `REPO_FILE_CONTENT_MAX_BYTES`.
+- Preflight controls: `MIGRATOR_MAVEN_CMD`, `MIGRATOR_REQUIRE_MAVEN_PREFLIGHT`, `MIGRATOR_PREFLIGHT_TIMEOUT_SEC`, `MIGRATOR_PREFLIGHT_USE_DOCKER`, `MIGRATOR_PREFLIGHT_DOCKER_IMAGE`.
 - Do not commit a real `.env` file. Use `.env.example` as the template instead.
 - The current Blueprint defaults to the `free` plan for easy testing.
 - If you need always-on behavior, better performance, or outbound SMTP on ports like `465`, switch the service plan from `free` to `starter` or higher in Render.

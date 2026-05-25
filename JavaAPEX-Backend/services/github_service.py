@@ -237,7 +237,6 @@ class GitHubService:
         pom_path = os.path.join(local_path, "pom.xml")
         gradle_path = os.path.join(local_path, "build.gradle")
         gradle_kts_path = os.path.join(local_path, "build.gradle.kts")
-        detected_main_class = self._detect_java_main_class(local_path)
         render_service_type = self._detect_render_service_type(local_path)
         java_version = self._detect_required_java_version(local_path)
         maven_builder_image = f"eclipse-temurin:{java_version}-jdk"
@@ -267,10 +266,9 @@ class GitHubService:
                     f"FROM {jre_runtime_image}\n"
                     "WORKDIR /app\n"
                     "COPY --from=build /app/app.jar /app/app.jar\n"
-                    f"ENV APP_MAIN_CLASS=\"{detected_main_class or ''}\"\n"
                     f"ENV RENDER_SERVICE_TYPE=\"{render_service_type}\"\n"
                     "EXPOSE 8080\n"
-                    "ENTRYPOINT [\"sh\", \"-c\", \"if unzip -p /app/app.jar META-INF/MANIFEST.MF 2>/dev/null | tr -d '\\r' | grep -Eq '^(Main-Class|Start-Class):'; then exec java -jar /app/app.jar; elif [ -n \\\"$APP_MAIN_CLASS\\\" ]; then exec java -cp /app/app.jar \\\"$APP_MAIN_CLASS\\\"; elif [ \\\"$RENDER_SERVICE_TYPE\\\" = \\\"background_worker\\\" ]; then echo 'Library/background workload detected; keeping worker alive.'; exec sleep infinity; else echo 'No runnable main class found for web service; failing deploy.'; exit 1; fi\"]\n"
+                    "ENTRYPOINT [\"sh\", \"-c\", \"if [ \\\"$RENDER_SERVICE_TYPE\\\" = \\\"background_worker\\\" ]; then java -jar /app/app.jar || { echo 'Background worker artifact is not runnable; keeping container alive.'; exec sleep infinity; }; else exec java -jar /app/app.jar; fi\"]\n"
                 )
             elif os.path.exists(gradle_path) or os.path.exists(gradle_kts_path):
                 dockerfile = (
@@ -323,6 +321,11 @@ class GitHubService:
 
         os.makedirs(workflows_dir, exist_ok=True)
         render_service_type = self._detect_render_service_type(local_path)
+        render_docker_command = (
+            "/bin/sh -c \"java -jar /app/app.jar || exec sleep infinity\""
+            if render_service_type == "background_worker"
+            else "java -jar /app/app.jar"
+        )
         service_suffix = "-worker" if render_service_type == "background_worker" else ""
         def _yaml_quote(value: str) -> str:
             # Use YAML single-quoted scalars and escape embedded single quotes.
@@ -594,7 +597,8 @@ jobs:
                 --arg name "$SERVICE_NAME" \
                 --arg repo "$REPO_URL" \
                 --arg branch "$BRANCH" \
-                '{{type:"{render_service_type}",ownerId:$owner,name:$name,repo:$repo,branch:$branch,autoDeploy:"yes",serviceDetails:{{runtime:"docker",plan:"free"}}}}')
+                --arg docker_cmd '{render_docker_command}' \
+                '{{type:"{render_service_type}",ownerId:$owner,name:$name,repo:$repo,branch:$branch,autoDeploy:"yes",serviceDetails:{{runtime:"docker",plan:"free",envSpecificDetails:{{dockerCommand:$docker_cmd}}}}}}')
               CREATE_RESP=$(curl -sS -X POST "https://api.render.com/v1/services" \
                 -H "Authorization: Bearer $RENDER_API_KEY" \
                 -H "Content-Type: application/json" \
@@ -605,6 +609,23 @@ jobs:
                 echo "Failed to create service. Response: $CREATE_RESP"
                 exit 1
               fi
+            fi
+
+            echo "Normalizing Render runtime/start settings for service id: $SERVICE_ID"
+            UPDATE_PAYLOAD=$(jq -n \
+              --arg repo "$REPO_URL" \
+              --arg branch "$BRANCH" \
+              --arg docker_cmd '{render_docker_command}' \
+              '{{repo:$repo,branch:$branch,autoDeploy:"yes",serviceDetails:{{runtime:"docker",envSpecificDetails:{{dockerCommand:$docker_cmd}}}}}}')
+            UPDATE_RESP=$(curl -sS -X PATCH "https://api.render.com/v1/services/$SERVICE_ID" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d "$UPDATE_PAYLOAD")
+            UPDATE_ID=$(echo "$UPDATE_RESP" | jq -r '.service.id // .id // empty')
+            if [[ -z "$UPDATE_ID" || "$UPDATE_ID" == "null" ]]; then
+              echo "Warning: unable to normalize service settings (response follows), continuing with deploy trigger."
+              echo "$UPDATE_RESP"
             fi
 
             echo "Triggering deploy for service id: $SERVICE_ID"

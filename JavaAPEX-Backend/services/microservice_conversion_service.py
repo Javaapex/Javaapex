@@ -17,10 +17,13 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
+import subprocess
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from models.microservice_readiness import (
     MicroserviceReadinessReport,
@@ -68,6 +71,16 @@ class ConversionResult:
     render_deployment: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class MavenDependency:
+    """Minimal dependency shape copied from source build files."""
+    group_id: str
+    artifact_id: str
+    version: str = ""
+    scope: str = ""
+    optional: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -86,6 +99,22 @@ SPRING_DATA_JPA = "org.springframework.boot:spring-boot-starter-data-jpa"
 
 SKIP_DIRS = {".git", ".gradle", ".idea", ".mvn", "build", "dist",
              "node_modules", "out", "target", "microservices-output"}
+
+DEFAULT_GENERATED_DEPENDENCY_KEYS = frozenset((
+    "org.springframework.boot:spring-boot-starter",
+    "org.springframework.boot:spring-boot-starter-web",
+    "org.springframework.boot:spring-boot-starter-actuator",
+    "org.springframework.boot:spring-boot-starter-validation",
+    "org.springframework.boot:spring-boot-starter-test",
+    "org.springframework.boot:spring-boot-starter-data-jpa",
+    "org.springframework.cloud:spring-cloud-starter-netflix-eureka-client",
+    "org.springframework.cloud:spring-cloud-starter-gateway",
+    "org.springframework.kafka:spring-kafka",
+    "org.postgresql:postgresql",
+    "org.projectlombok:lombok",
+))
+PROPERTY_RE = re.compile(r"\$\{([^}]+)\}")
+VALID_MAVEN_PROPERTY_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +146,8 @@ def _safe_copy2(src, dest):
 
 def _read_text(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        # utf-8-sig keeps regular UTF-8 behavior and strips BOM when present.
+        return path.read_text(encoding="utf-8-sig", errors="ignore")
     except OSError:
         return ""
 
@@ -192,6 +222,399 @@ def _detect_build_tool(root: Path) -> str:
     if (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
         return "gradle"
     return "maven"
+
+
+def _dep_key(group_id: str, artifact_id: str) -> str:
+    return f"{group_id.strip()}:{artifact_id.strip()}".lower()
+
+
+def _spring_cloud_version_for_boot(spring_boot_version: str) -> str:
+    try:
+        major = int((spring_boot_version or "3").split(".", 1)[0])
+    except ValueError:
+        major = 3
+    # Spring Boot 2.x aligns with Spring Cloud 2021.x, Boot 3.x with 2023.x.
+    return "2021.0.8" if major < 3 else "2023.0.1"
+
+
+def _detect_legacy_javax_usage(files: List[Dict[str, Any]]) -> bool:
+    legacy_markers = (
+        "import javax.persistence.",
+        "import javax.validation.",
+        "import javax.servlet.",
+        "import javax.annotation.",
+    )
+    for f in files:
+        content = f.get("content", "")
+        if not content:
+            continue
+        if any(marker in content for marker in legacy_markers):
+            return True
+    return False
+
+
+def _xml_namespace(tag: str) -> str:
+    if tag.startswith("{") and "}" in tag:
+        return tag[1:].split("}", 1)[0]
+    return ""
+
+
+def _xml_tag(ns: str, name: str) -> str:
+    return f"{{{ns}}}{name}" if ns else name
+
+
+def _xml_child_text(node: ET.Element, ns: str, name: str) -> str:
+    child = node.find(_xml_tag(ns, name))
+    if child is None or child.text is None:
+        return ""
+    return child.text.strip()
+
+
+def _resolve_property_placeholders(raw: str, properties: Dict[str, str]) -> str:
+    if not raw:
+        return ""
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        return properties.get(key, match.group(0))
+
+    return PROPERTY_RE.sub(_replace, raw).strip()
+
+
+def _parse_pom_properties(root_node: ET.Element, ns: str) -> Dict[str, str]:
+    props: Dict[str, str] = {}
+    props_node = root_node.find(_xml_tag(ns, "properties"))
+    if props_node is None:
+        return props
+    for child in list(props_node):
+        tag_name = child.tag.split("}", 1)[-1]
+        value = (child.text or "").strip()
+        if value:
+            props[tag_name] = value
+    return props
+
+
+def _parse_pom_dependencies(
+    pom_path: Path,
+    inherited_properties: Optional[Dict[str, str]] = None,
+) -> Tuple[List[MavenDependency], Dict[str, str], Dict[str, str]]:
+    content = _read_text(pom_path)
+    if not content.strip():
+        return [], {}, {}
+
+    try:
+        root_node = ET.fromstring(content)
+    except ET.ParseError:
+        logger.warning("Skipping unreadable pom.xml (parse error): %s", pom_path)
+        return [], {}, {}
+
+    ns = _xml_namespace(root_node.tag)
+    properties = dict(inherited_properties or {})
+    local_props = _parse_pom_properties(root_node, ns)
+    properties.update(local_props)
+
+    managed_versions: Dict[str, str] = {}
+    dep_mgmt = root_node.find(_xml_tag(ns, "dependencyManagement"))
+    if dep_mgmt is not None:
+        dep_mgmt_deps = dep_mgmt.find(_xml_tag(ns, "dependencies"))
+        if dep_mgmt_deps is not None:
+            for dep_node in dep_mgmt_deps.findall(_xml_tag(ns, "dependency")):
+                group_id = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "groupId"), properties)
+                artifact_id = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "artifactId"), properties)
+                version = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "version"), properties)
+                scope = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "scope"), properties).lower()
+                dep_type = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "type"), properties).lower()
+                if not group_id or not artifact_id or not version:
+                    continue
+                if dep_type == "pom" and scope == "import":
+                    continue
+                managed_versions[_dep_key(group_id, artifact_id)] = version
+
+    deps_node = root_node.find(_xml_tag(ns, "dependencies"))
+    if deps_node is None:
+        return [], local_props, managed_versions
+
+    deps: List[MavenDependency] = []
+    for dep_node in deps_node.findall(_xml_tag(ns, "dependency")):
+        group_id = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "groupId"), properties)
+        artifact_id = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "artifactId"), properties)
+        version = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "version"), properties)
+        scope = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "scope"), properties).lower()
+        dep_type = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "type"), properties).lower()
+        optional_raw = _resolve_property_placeholders(_xml_child_text(dep_node, ns, "optional"), properties).lower()
+        optional = optional_raw == "true"
+
+        if not group_id or not artifact_id:
+            continue
+        # Ignore BOM imports from regular dependencies blocks.
+        if dep_type == "pom" and scope == "import":
+            continue
+        if not version:
+            version = managed_versions.get(_dep_key(group_id, artifact_id), "")
+
+        deps.append(MavenDependency(
+            group_id=group_id,
+            artifact_id=artifact_id,
+            version=version,
+            scope=scope,
+            optional=optional,
+        ))
+
+    return deps, local_props, managed_versions
+
+
+def _parse_gradle_dependencies(gradle_path: Path) -> List[MavenDependency]:
+    content = _read_text(gradle_path)
+    if not content:
+        return []
+
+    pattern = re.compile(
+        r"^\s*(implementation|api|compileOnly|runtimeOnly|testImplementation|annotationProcessor)\s*\(?\s*['\"]([^:'\"()]+):([^:'\"()]+)(?::([^'\"()]+))?['\"]",
+        re.MULTILINE,
+    )
+    scope_map = {
+        "implementation": "",
+        "api": "",
+        "compileOnly": "provided",
+        "runtimeOnly": "runtime",
+        "testImplementation": "test",
+        "annotationProcessor": "provided",
+    }
+
+    deps: List[MavenDependency] = []
+    for cfg, group_id, artifact_id, version in pattern.findall(content):
+        deps.append(MavenDependency(
+            group_id=group_id.strip(),
+            artifact_id=artifact_id.strip(),
+            version=(version or "").strip(),
+            scope=scope_map.get(cfg, ""),
+            optional=False,
+        ))
+    return deps
+
+
+def _collect_source_build_inputs(root: Path) -> Tuple[List[MavenDependency], Dict[str, str]]:
+    properties: Dict[str, str] = {}
+    managed_versions: Dict[str, str] = {}
+    dependencies: List[MavenDependency] = []
+    seen_dep_keys: Set[Tuple[str, str]] = set()
+
+    pom_files = sorted(
+        p for p in root.rglob("pom.xml")
+        if "target" not in p.parts and ".mvn" not in p.parts
+    )
+    for pom_path in pom_files:
+        parsed_deps, local_props, local_managed_versions = _parse_pom_dependencies(pom_path, properties)
+        for k, v in local_props.items():
+            if k not in properties:
+                properties[k] = v
+        for k, v in local_managed_versions.items():
+            if k not in managed_versions:
+                managed_versions[k] = v
+        for dep in parsed_deps:
+            dep_key = _dep_key(dep.group_id, dep.artifact_id)
+            dep_version = dep.version or local_managed_versions.get(dep_key) or managed_versions.get(dep_key, "")
+            dep = MavenDependency(
+                group_id=dep.group_id,
+                artifact_id=dep.artifact_id,
+                version=dep_version,
+                scope=dep.scope,
+                optional=dep.optional,
+            )
+            dep_scope = dep.scope or ""
+            dedupe_key = (dep_key, dep_scope)
+            if dedupe_key in seen_dep_keys:
+                continue
+            seen_dep_keys.add(dedupe_key)
+            dependencies.append(dep)
+
+    if not dependencies:
+        for gradle_name in ("build.gradle", "build.gradle.kts"):
+            gradle_path = root / gradle_name
+            if not gradle_path.exists():
+                continue
+            for dep in _parse_gradle_dependencies(gradle_path):
+                dep_scope = dep.scope or ""
+                dedupe_key = (_dep_key(dep.group_id, dep.artifact_id), dep_scope)
+                if dedupe_key in seen_dep_keys:
+                    continue
+                seen_dep_keys.add(dedupe_key)
+                dependencies.append(dep)
+
+    filtered: List[MavenDependency] = []
+    for dep in dependencies:
+        scope = (dep.scope or "").lower()
+        if scope == "test":
+            continue
+        if _dep_key(dep.group_id, dep.artifact_id) in DEFAULT_GENERATED_DEPENDENCY_KEYS:
+            continue
+        filtered.append(dep)
+
+    return filtered, properties
+
+
+def _render_maven_dependency_xml(dep: MavenDependency) -> str:
+    lines = [
+        "        <dependency>",
+        f"            <groupId>{dep.group_id}</groupId>",
+        f"            <artifactId>{dep.artifact_id}</artifactId>",
+    ]
+    if dep.version:
+        lines.append(f"            <version>{dep.version}</version>")
+    if dep.scope:
+        lines.append(f"            <scope>{dep.scope}</scope>")
+    if dep.optional:
+        lines.append("            <optional>true</optional>")
+    lines.append("        </dependency>")
+    return "\n".join(lines)
+
+
+def _summarize_maven_failure(output: str, max_lines: int = 80) -> str:
+    lines = [line.rstrip() for line in (output or "").splitlines() if line.strip()]
+    if not lines:
+        return "Maven build failed without any console output."
+
+    prioritized: List[str] = []
+    for line in lines:
+        lowered = line.lower()
+        if (
+            "[error]" in lowered
+            or "compilation failure" in lowered
+            or "compilation error" in lowered
+            or "cannot find symbol" in lowered
+            or "symbol:" in lowered
+            or "location:" in lowered
+        ):
+            prioritized.append(line)
+    snippet = prioritized[:max_lines] if prioritized else lines[-max_lines:]
+    return "\n".join(snippet)
+
+
+def _is_truthy(value: str) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_maven_preflight_goals() -> List[str]:
+    return [
+        "-B",
+        "-DskipTests",
+        "-Dmaven.test.skip=true",
+        "-Dspotbugs.skip=true",
+        "-Dcheckstyle.skip=true",
+        "-Djacoco.skip=true",
+        "package",
+    ]
+
+
+def _docker_daemon_available(docker_bin: str) -> bool:
+    try:
+        probe = subprocess.run(
+            [docker_bin, "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def _resolve_maven_preflight_command(project_root: Path) -> Tuple[List[str], str]:
+    goals = _build_maven_preflight_goals()
+
+    # 1) Explicit override has highest priority.
+    configured_cmd = (os.getenv("MIGRATOR_MAVEN_CMD") or "").strip()
+    if configured_cmd:
+        configured_parts = shlex.split(configured_cmd, posix=(os.name != "nt"))
+        if configured_parts:
+            return configured_parts + goals, "maven:configured"
+
+    # 2) Maven wrapper from generated output, if present.
+    mvnw_cmd = project_root / "mvnw.cmd"
+    mvnw_sh = project_root / "mvnw"
+    if os.name == "nt" and mvnw_cmd.exists():
+        return [str(mvnw_cmd)] + goals, "maven:wrapper"
+    if mvnw_sh.exists():
+        return ["sh", str(mvnw_sh)] + goals, "maven:wrapper"
+
+    # 3) Native Maven binary on PATH.
+    native_candidates = ["mvn.cmd", "mvn"] if os.name == "nt" else ["mvn"]
+    for candidate in native_candidates:
+        if shutil.which(candidate):
+            return [candidate] + goals, "maven:path"
+
+    # 4) Optional dockerized Maven fallback for local environments.
+    if _is_truthy(os.getenv("MIGRATOR_PREFLIGHT_USE_DOCKER", "true")):
+        docker_bin = shutil.which("docker")
+        if docker_bin and _docker_daemon_available(docker_bin):
+            docker_image = (os.getenv("MIGRATOR_PREFLIGHT_DOCKER_IMAGE") or "maven:3.9.9-eclipse-temurin-17").strip()
+            mount_src = str(project_root.resolve())
+            docker_cmd = [
+                docker_bin,
+                "run",
+                "--rm",
+                "-v",
+                f"{mount_src}:/workspace",
+                "-w",
+                "/workspace",
+                docker_image,
+                "mvn",
+            ] + goals
+            return docker_cmd, f"maven:docker:{docker_image}"
+        if docker_bin:
+            logger.warning("Docker binary found but daemon is not reachable; cannot use Docker Maven fallback.")
+
+    raise FileNotFoundError("No Maven command available (configured, wrapper, PATH, or Docker fallback).")
+
+
+def _run_maven_preflight_build(project_root: Path) -> str:
+    if os.getenv("MIGRATOR_SKIP_PREFLIGHT_BUILD", "").lower() in {"1", "true", "yes"}:
+        logger.warning("Skipping generated output build preflight due to MIGRATOR_SKIP_PREFLIGHT_BUILD")
+        return "skipped:env"
+
+    timeout_seconds = int(os.getenv("MIGRATOR_PREFLIGHT_TIMEOUT_SEC", "900"))
+    try:
+        cmd, mode = _resolve_maven_preflight_command(project_root)
+        logger.info(
+            "Running generated-output preflight build (%s): %s (cwd=%s)",
+            mode,
+            " ".join(cmd),
+            project_root,
+        )
+        completed = subprocess.run(
+            cmd,
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        if _is_truthy(os.getenv("MIGRATOR_REQUIRE_MAVEN_PREFLIGHT", "true")):
+            raise ValueError(
+                "Generated output preflight build could not start because Maven is unavailable. "
+                "Install Maven on PATH, set MIGRATOR_MAVEN_CMD, or enable Docker fallback."
+            ) from exc
+        logger.warning(
+            "Maven command unavailable for preflight build; skipping because MIGRATOR_REQUIRE_MAVEN_PREFLIGHT is false."
+        )
+        return "skipped:maven-missing"
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(
+            f"Generated output build timed out after {timeout_seconds}s during preflight."
+        ) from exc
+
+    combined_output = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    if completed.returncode != 0:
+        snippet = _summarize_maven_failure(combined_output)
+        raise ValueError(
+            "Generated output failed Maven preflight build. "
+            "Aborting migration to prevent broken output.\n"
+            f"{snippet}"
+        )
+    logger.info("Generated output preflight build succeeded.")
+    return mode
 
 
 # ---------------------------------------------------------------------------
@@ -788,65 +1211,59 @@ def _generate_pom_xml(
     has_database: bool,
     has_messaging: bool,
     parent_artifact_id: str = "",
+    additional_dependencies: Optional[List[MavenDependency]] = None,
+    source_properties: Optional[Dict[str, str]] = None,
 ) -> str:
-    deps = [
-        "        <dependency>\n"
-        "            <groupId>org.springframework.boot</groupId>\n"
-        "            <artifactId>spring-boot-starter-web</artifactId>\n"
-        "        </dependency>",
-        "        <dependency>\n"
-        "            <groupId>org.springframework.boot</groupId>\n"
-        "            <artifactId>spring-boot-starter-actuator</artifactId>\n"
-        "        </dependency>",
-        "        <dependency>\n"
-        "            <groupId>org.springframework.cloud</groupId>\n"
-        "            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>\n"
-        "        </dependency>",
-        "        <dependency>\n"
-        "            <groupId>org.springframework.boot</groupId>\n"
-        "            <artifactId>spring-boot-starter-validation</artifactId>\n"
-        "        </dependency>",
+    spring_cloud_version = _spring_cloud_version_for_boot(spring_boot_version)
+
+    deps: List[MavenDependency] = [
+        MavenDependency("org.springframework.boot", "spring-boot-starter-web"),
+        MavenDependency("org.springframework.boot", "spring-boot-starter-actuator"),
+        MavenDependency("org.springframework.cloud", "spring-cloud-starter-netflix-eureka-client"),
+        MavenDependency("org.springframework.boot", "spring-boot-starter-validation"),
     ]
 
     if has_database:
-        deps.append(
-            "        <dependency>\n"
-            "            <groupId>org.springframework.boot</groupId>\n"
-            "            <artifactId>spring-boot-starter-data-jpa</artifactId>\n"
-            "        </dependency>"
-        )
-        deps.append(
-            "        <dependency>\n"
-            "            <groupId>org.postgresql</groupId>\n"
-            "            <artifactId>postgresql</artifactId>\n"
-            "            <scope>runtime</scope>\n"
-            "        </dependency>"
-        )
+        deps.append(MavenDependency("org.springframework.boot", "spring-boot-starter-data-jpa"))
+        deps.append(MavenDependency("org.postgresql", "postgresql", scope="runtime"))
 
     if has_messaging:
-        deps.append(
-            "        <dependency>\n"
-            "            <groupId>org.springframework.kafka</groupId>\n"
-            "            <artifactId>spring-kafka</artifactId>\n"
-            "        </dependency>"
-        )
+        deps.append(MavenDependency("org.springframework.kafka", "spring-kafka"))
 
-    deps.append(
-        "        <dependency>\n"
-        "            <groupId>org.projectlombok</groupId>\n"
-        "            <artifactId>lombok</artifactId>\n"
-        "            <optional>true</optional>\n"
-        "        </dependency>"
-    )
-    deps.append(
-        "        <dependency>\n"
-        "            <groupId>org.springframework.boot</groupId>\n"
-        "            <artifactId>spring-boot-starter-test</artifactId>\n"
-        "            <scope>test</scope>\n"
-        "        </dependency>"
-    )
+    deps.append(MavenDependency("org.projectlombok", "lombok", optional=True))
+    deps.append(MavenDependency("org.springframework.boot", "spring-boot-starter-test", scope="test"))
 
-    deps_xml = "\n".join(deps)
+    seen_keys: Set[Tuple[str, str]] = {
+        (_dep_key(dep.group_id, dep.artifact_id), dep.scope or "")
+        for dep in deps
+    }
+    for dep in (additional_dependencies or []):
+        dep_scope = dep.scope or ""
+        dedupe_key = (_dep_key(dep.group_id, dep.artifact_id), dep_scope)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        deps.append(dep)
+
+    deps_xml = "\n".join(_render_maven_dependency_xml(dep) for dep in deps)
+
+    properties: Dict[str, str] = {
+        "java.version": java_version,
+        "spring-cloud.version": spring_cloud_version,
+    }
+    for key, value in sorted((source_properties or {}).items()):
+        if key in properties:
+            continue
+        if not value or "\n" in value or "\r" in value:
+            continue
+        if not VALID_MAVEN_PROPERTY_NAME_RE.match(key):
+            continue
+        properties[key] = value
+
+    properties_xml = "\n".join(
+        f"        <{prop_key}>{prop_value}</{prop_key}>"
+        for prop_key, prop_value in properties.items()
+    )
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -868,8 +1285,7 @@ def _generate_pom_xml(
     <description>{service_name} microservice</description>
 
     <properties>
-        <java.version>{java_version}</java.version>
-        <spring-cloud.version>2023.0.1</spring-cloud.version>
+{properties_xml}
     </properties>
 
     <dependencies>
@@ -1036,6 +1452,7 @@ def _generate_docker_compose(
 
 
 def _generate_api_gateway_pom(group_id: str, spring_boot_version: str, java_version: str) -> str:
+    spring_cloud_version = _spring_cloud_version_for_boot(spring_boot_version)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -1056,7 +1473,7 @@ def _generate_api_gateway_pom(group_id: str, spring_boot_version: str, java_vers
 
     <properties>
         <java.version>{java_version}</java.version>
-        <spring-cloud.version>2023.0.1</spring-cloud.version>
+        <spring-cloud.version>{spring_cloud_version}</spring-cloud.version>
     </properties>
 
     <dependencies>
@@ -1701,6 +2118,21 @@ class MicroserviceConversionService:
         build_tool = _detect_build_tool(root)
         java_version = _detect_java_version(root)
         spring_boot_version = _detect_spring_boot_version(root)
+        source_dependencies, source_properties = _collect_source_build_inputs(root)
+
+        if _detect_legacy_javax_usage(files):
+            try:
+                boot_major = int((spring_boot_version or "3").split(".", 1)[0])
+            except ValueError:
+                boot_major = 3
+            if boot_major >= 3:
+                logger.warning(
+                    "Detected legacy javax.* imports with Spring Boot %s baseline; "
+                    "switching generated services to Spring Boot 2.7.18 for compilation compatibility.",
+                    spring_boot_version,
+                )
+                spring_boot_version = "2.7.18"
+
         group_id = base_package.rsplit(".", 1)[0] if "." in base_package else base_package
         project_name = root.name
 
@@ -1708,6 +2140,8 @@ class MicroserviceConversionService:
             "Project: %s | base_package=%s | build=%s | java=%s | spring_boot=%s | files=%d",
             project_name, base_package, build_tool, java_version, spring_boot_version, len(files),
         )
+        if source_dependencies:
+            logger.info("Carrying forward %d source dependencies into generated service POMs", len(source_dependencies))
 
         # Log detected components
         controllers = [f for f in files if f.get("is_controller")]
@@ -1918,6 +2352,39 @@ class MicroserviceConversionService:
         # 4c. Post-assignment validation: remove services with zero source files
         ms_projects = [ms for ms in ms_projects if ms.source_files]
 
+        if not ms_projects:
+            logger.warning(
+                "No files were assigned to discovered boundaries. Falling back to a single default service to avoid empty output."
+            )
+            fallback_artifact = f"{_sanitize(project_name)}-service"
+            fallback = MicroserviceProject(
+                name=fallback_artifact,
+                artifact_id=fallback_artifact,
+                base_package=f"{base_package}.fallback",
+                packages=[],
+                has_database=any(f.get("is_entity") for f in files),
+                has_messaging=any("kafka" in imp.lower() or "rabbit" in imp.lower() for f in files for imp in f.get("imports", [])),
+                port=8081,
+                description="Fallback service generated because no boundaries produced assignable files.",
+            )
+            for f in files:
+                if f.get("is_main_app"):
+                    continue
+                fallback.source_files.append(f["abs_path"])
+                if f.get("is_controller"):
+                    fallback.controllers.append(f["class_name"])
+                if f.get("is_entity"):
+                    fallback.entities.append(f["class_name"])
+                if f.get("is_repository"):
+                    fallback.repositories.append(f["class_name"])
+                if f.get("is_service"):
+                    fallback.services.append(f["class_name"])
+            if not fallback.source_files:
+                for f in files:
+                    fallback.source_files.append(f["abs_path"])
+            ms_projects = [fallback]
+            unassigned_files = []
+
         # Log assignment results
         for ms in ms_projects:
             logger.info(
@@ -1948,6 +2415,8 @@ class MicroserviceConversionService:
                 group_id, ms.artifact_id, ms.name,
                 spring_boot_version, java_version,
                 ms.has_database, ms.has_messaging,
+                additional_dependencies=source_dependencies,
+                source_properties=source_properties,
             )
             (svc_dir / "pom.xml").write_text(pom, encoding="utf-8")
 
@@ -2092,6 +2561,9 @@ class MicroserviceConversionService:
         # Root README
         readme = _generate_readme(project_name, ms_projects)
         (out / "README.md").write_text(readme, encoding="utf-8")
+
+        # Compile/package preflight: do not return output that cannot build.
+        preflight_status = _run_maven_preflight_build(out)
 
         # Generate Render.com deployment configuration using LLM analysis (DEFAULT DEPLOYMENT)
         logger.info("Analyzing service configurations for Render.com deployment (default workflow)...")
@@ -2318,6 +2790,7 @@ Run the deployment script to go live!
             f"+ API Gateway + {'shared library' if unassigned_files else 'no shared module'}. "
             f"Total source files distributed: {sum(len(ms.source_files) for ms in ms_projects)}, "
             f"unassigned to shared: {len(unassigned_files)}. "
+            f"Build preflight: {preflight_status}. "
             f"Generated Render.com deployment configuration (DEFAULT WORKFLOW) with LLM-based optimization."
         )
         logger.info(summary)

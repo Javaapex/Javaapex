@@ -15,6 +15,12 @@ services:
     envVars:
       - key: WORK_DIR
         value: /tmp/migrations
+      - key: MIGRATOR_MAVEN_CMD
+        value: /usr/bin/mvn
+      - key: MIGRATOR_REQUIRE_MAVEN_PREFLIGHT
+        value: "true"
+      - key: MIGRATOR_PREFLIGHT_USE_DOCKER
+        value: "false"
       - key: LOCAL_PROJECTS_ENABLED
         value: "true"
       - key: LOCAL_PROJECT_ALLOW_ANY_PATH

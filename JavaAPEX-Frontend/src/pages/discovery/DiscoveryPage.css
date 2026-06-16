@@ -1,0 +1,59 @@
+/* ── Discovery Page (Step 2) ───────────────────────────── */
+
+.page-discovery {
+  animation: pageSlideIn 0.3s ease-out;
+}
+
+@keyframes pageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Dependency cards grid */
+.page-discovery .discovery-dep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+/* Framework badges */
+.page-discovery .discovery-framework-badge {
+  transition: all 0.2s ease;
+}
+
+.page-discovery .discovery-framework-badge:hover {
+  transform: translateY(-2px);
+}
+
+/* File explorer tree */
+.page-discovery .discovery-file-tree {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+/* Analysis timer */
+.page-discovery .discovery-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section fade-in */
+.page-discovery .discovery-section-enter {
+  animation: discoverySectionFade 0.35s ease-out;
+}
+
+@keyframes discoverySectionFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

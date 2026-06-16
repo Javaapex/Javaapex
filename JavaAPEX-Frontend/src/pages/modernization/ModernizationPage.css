@@ -1,0 +1,88 @@
+/* ── Modernization Page (Step 4) ───────────────────────── */
+
+.page-modernization {
+  animation: pageSlideIn 0.3s ease-out;
+}
+
+@keyframes pageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modernization feature cards */
+.page-modernization .mod-feature-card {
+  transition: all 0.2s ease;
+}
+
+.page-modernization .mod-feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+/* Target repo configuration */
+.page-modernization .mod-target-config {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  background: #f8fafc;
+}
+
+/* LLM provider selector */
+.page-modernization .mod-llm-select {
+  transition: border-color 0.2s ease;
+}
+
+.page-modernization .mod-llm-select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* Option toggles */
+.page-modernization .mod-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.page-modernization .mod-toggle-row:last-child {
+  border-bottom: none;
+}
+
+/* Start migration CTA */
+.page-modernization .mod-start-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.page-modernization .mod-start-btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  animation: modShimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes modShimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}

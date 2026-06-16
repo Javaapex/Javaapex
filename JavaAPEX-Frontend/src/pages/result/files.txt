@@ -1,0 +1,35 @@
+Result Page – Steps 5, 6, 7 (Migration Results)
+=================================================
+
+Files in this folder:
+
+1. index.tsx          – ResultPage component (layout wrapper for Steps 5-7)
+2. ResultPage.css     – Page-specific styles for all result sub-steps
+3. files.txt          – This manifest file
+
+Purpose:
+  The Result page covers the migration execution and reporting experience.
+  It contains three sub-steps rendered within a single page wrapper.
+
+Sub-Steps:
+  Step 5 – Migration Animation
+    → Real-time phase-based progress visualisation
+    → Shows: analysis → dependencies → transformations → quality → report
+    → Live progress bar with percentage
+    → Current status headline and recent log entry
+
+  Step 6 – Migration Progress
+    → Polling-based progress tracking
+    → Displayed when the animation step transitions to active monitoring
+
+  Step 7 – Migration Report
+    → Full migration results with hero stats section
+    → SonarQube quality analysis (bugs, vulnerabilities, code smells)
+    → Unit test results and coverage
+    → FOSSA dependency analysis
+    → Code changes and file diffs
+    → Dependency migration report
+    → Business logic insights
+    → JMeter performance results
+    → Download options (PDF report, ZIP archive, HTML document)
+    → "Start New Migration" to reset wizard

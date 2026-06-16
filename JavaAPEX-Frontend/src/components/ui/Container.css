@@ -1,0 +1,37 @@
+/* ── UI Container ──────────────────────────────────────── */
+
+.ui-container {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ui-container--padded {
+  padding: 24px 40px;
+}
+
+.ui-container--centered {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ── Sizes ──────────────────────────────────────────────── */
+
+.ui-container--sm {
+  max-width: 640px;
+}
+
+.ui-container--md {
+  max-width: 960px;
+}
+
+.ui-container--lg {
+  max-width: 1200px;
+}
+
+.ui-container--xl {
+  max-width: 1440px;
+}
+
+.ui-container--full {
+  max-width: 100%;
+}

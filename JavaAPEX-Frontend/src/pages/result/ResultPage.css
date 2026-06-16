@@ -1,0 +1,103 @@
+/* ── Result Page (Steps 5–7) ───────────────────────────── */
+
+.page-result {
+  animation: pageSlideIn 0.3s ease-out;
+}
+
+@keyframes pageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Migration Animation (Step 5) ─────────────────────── */
+
+.page-result .result-animation-phase {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.page-result .result-animation-phase.is-complete {
+  opacity: 0.65;
+}
+
+.page-result .result-progress-orb {
+  animation: resultOrbPulse 2s ease-in-out infinite;
+}
+
+@keyframes resultOrbPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.3);
+  }
+  50% {
+    transform: scale(1.04);
+    box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
+  }
+}
+
+/* ── Migration Progress (Step 6) ──────────────────────── */
+
+.page-result .result-progress-bar {
+  transition: width 0.4s ease;
+}
+
+/* ── Final Report (Step 7) ────────────────────────────── */
+
+.page-result .result-report-hero {
+  border-radius: 28px;
+  overflow: hidden;
+}
+
+.page-result .result-report-section {
+  transition: all 0.25s ease;
+}
+
+.page-result .result-report-section:hover {
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+}
+
+/* Sonar category cards */
+.page-result .result-sonar-card {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.page-result .result-sonar-card:hover {
+  transform: translateY(-2px);
+}
+
+.page-result .result-sonar-card.is-active {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+/* Stat cards */
+.page-result .result-stat-card {
+  text-align: center;
+  transition: transform 0.15s ease;
+}
+
+.page-result .result-stat-card:hover {
+  transform: scale(1.02);
+}
+
+/* Action buttons row */
+.page-result .result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+/* Success banner */
+.page-result .result-success-banner {
+  background: linear-gradient(135deg, #dcfce7 0%, #d1fae5 100%);
+  border: 1px solid #86efac;
+  border-radius: 16px;
+  text-align: center;
+  padding: 28px;
+}

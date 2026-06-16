@@ -1,0 +1,22 @@
+Strategy Page – Step 3 (Assessment & Migration Strategy)
+==========================================================
+
+Files in this folder:
+
+1. index.tsx          – StrategyPage component (layout wrapper for Step 3)
+2. StrategyPage.css   – Page-specific styles for the strategy step
+3. files.txt          – This manifest file
+
+Purpose:
+  The Strategy page presents the risk assessment and lets users
+  configure how the migration will proceed. Includes Java version
+  recommendation, migration approach selection, and conversion options.
+
+Step Flow:
+  → Risk assessment displayed (low / medium / high)
+  → Assessment grid with project metrics
+  → Java version recommendation (source → target)
+  → Migration approach selection (full / selective / incremental)
+  → Conversion types selection (dependencies, testing, code quality, etc.)
+  → Strategy chat widget for AI-assisted guidance
+  → "Start Migration" advances to Step 4

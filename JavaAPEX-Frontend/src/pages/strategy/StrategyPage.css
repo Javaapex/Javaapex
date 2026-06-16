@@ -1,0 +1,67 @@
+/* ── Strategy Page (Step 3) ────────────────────────────── */
+
+.page-strategy {
+  animation: pageSlideIn 0.3s ease-out;
+}
+
+@keyframes pageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Risk badge pulsing for high risk */
+.page-strategy .strategy-risk-high {
+  animation: strategyRiskPulse 2s ease-in-out infinite;
+}
+
+@keyframes strategyRiskPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+/* Conversion option cards */
+.page-strategy .strategy-option-card {
+  transition: all 0.2s ease;
+}
+
+.page-strategy .strategy-option-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.page-strategy .strategy-option-card.is-selected {
+  border-color: #2563eb;
+  background: #f8fbff;
+}
+
+/* Java version recommendation card */
+.page-strategy .strategy-recommendation {
+  border-left: 4px solid #2563eb;
+}
+
+/* Assessment grid items */
+.page-strategy .strategy-assessment-item {
+  text-align: center;
+  transition: transform 0.15s ease;
+}
+
+.page-strategy .strategy-assessment-item:hover {
+  transform: scale(1.02);
+}
+
+/* Chat widget area */
+.page-strategy .strategy-chat-area {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 24px;
+  padding-top: 24px;
+}

@@ -1,0 +1,38 @@
+/* ── UI Page Header ────────────────────────────────────── */
+
+.ui-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.ui-page-header__copy {
+  flex: 1;
+  min-width: 200px;
+}
+
+.ui-page-header__title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.ui-page-header__subtitle {
+  font-size: 14px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.ui-page-header__trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

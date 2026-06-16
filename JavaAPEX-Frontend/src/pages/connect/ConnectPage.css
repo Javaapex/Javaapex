@@ -1,0 +1,43 @@
+/* ── Connect Page (Step 1) ─────────────────────────────── */
+
+.page-connect {
+  animation: pageSlideIn 0.3s ease-out;
+}
+
+@keyframes pageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Repository URL input focus ring */
+.page-connect input[type="text"]:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* PAT token card highlight */
+.page-connect .connect-pat-card {
+  border-left: 4px solid #f59e0b;
+}
+
+/* Connection mode buttons */
+.page-connect .connect-mode-btn {
+  transition: all 0.2s ease;
+}
+
+.page-connect .connect-mode-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.page-connect .connect-mode-btn.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}

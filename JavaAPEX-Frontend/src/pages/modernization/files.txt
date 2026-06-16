@@ -1,0 +1,21 @@
+Modernization Page – Step 4 (Build Modernization & Migration)
+===============================================================
+
+Files in this folder:
+
+1. index.tsx                – ModernizationPage component (layout wrapper for Step 4)
+2. ModernizationPage.css    – Page-specific styles for the modernization step
+3. files.txt                – This manifest file
+
+Purpose:
+  The Modernization page shows what will be upgraded and lets users
+  configure the migration before launching it. Includes previews of
+  planned changes, target repo settings, and LLM provider selection.
+
+Step Flow:
+  → "What we'll modernize" cards (Java version, code, deps, business logic, testing)
+  → Target repository configuration (repo name, branch, host)
+  → LLM provider selection
+  → Toggle options (run tests, SonarQube, FOSSA, functional tests)
+  → "Start Migration" button launches the migration job
+  → On launch: advances to Animation (Step 5)

@@ -1,0 +1,2683 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{REPO_NAME}} — Technical Document</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+@page {
+  size: A4;
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   ROOT & RESET
+═══════════════════════════════════════════════ */
+:root {
+  --ink: #1a1a1a;
+  --paper: #ffffff;
+  --cream: #f5f5f4;
+  --border: #d0d0d0;
+  --muted: #555555;
+  --page-w: 794px; /* A4 width in pixels at 96dpi */
+  --bg: #d4d4d4;
+  --brand-dark: #1a1a2e;
+  --brand-mid: #2d2d4e;
+  --risk-hi: #c0392b;
+  --risk-med: #e67e22;
+  --risk-lo: #888888;
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html {
+  width: 100%;
+}
+body {
+  background: var(--bg);
+  font-family: 'DM Mono', monospace;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════
+   PAGE SHELL
+═══════════════════════════════════════════════ */
+.doc-wrapper { 
+  width: 100%;
+  margin: 0 auto; 
+  padding: 56px 0 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.page {
+  background: var(--paper);
+  margin: 0 auto 28px auto;
+  box-shadow: 0 6px 40px rgba(0,0,0,.17), 0 1px 4px rgba(0,0,0,.07);
+  position: relative;
+  overflow: hidden;
+  width: var(--page-w);
+  max-width: calc(100% - 40px);
+  min-height: auto;
+  box-sizing: border-box;
+  page-break-after: always;
+  border-radius: 12px;
+}
+.page-inner { 
+  padding: 50px 60px; 
+  min-height: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pg-num {
+  position: absolute; bottom: 20px; right: 32px;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  color: #bbb; letter-spacing: .1em;
+}
+.pg-watermark {
+  position: absolute; bottom: 20px; left: 32px;
+  font-size: 9px; color: #ccc; letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════
+   DISCLAIMER PAGE  (PDF first-page style)
+═══════════════════════════════════════════════ */
+.disclaimer-page .page-inner { min-height: auto; padding: 52px 70px 50px; }
+
+.org-logo-bar {
+  display: flex; align-items: center; gap: 13px;
+  margin-bottom: 30px; padding-bottom: 20px;
+  border-bottom: 2px solid var(--border);
+}
+.org-logo-circle {
+  width: 42px; height: 42px;
+  border: 2px solid var(--ink); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Serif Display', serif; font-size: 19px; color: var(--ink);
+}
+.org-logo-name {
+  font-family: 'Syne', sans-serif; font-size: 13px;
+  font-weight: 700; letter-spacing: .06em; color: var(--ink);
+}
+
+.disclaimer-block {
+  font-family: 'DM Serif Display', serif;
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.9;
+  color: #333;
+  border-left: 3px solid var(--ink);
+  padding-left: 22px;
+  margin-bottom: 34px;
+}
+
+.disclaimer-doc-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 24px; line-height: 1.3;
+  color: var(--ink); margin-bottom: 28px;
+}
+
+.update-table, .static-table {
+  width: 100%; border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px; margin-bottom: 16px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
+.update-table th, .static-table th {
+  background: var(--ink); color: #fff;
+  padding: 12px 18px; text-align: left;
+  font-family: 'Syne', sans-serif; font-size: 10px;
+  letter-spacing: .15em; text-transform: uppercase; font-weight: 700;
+  border-top-left-radius: 0;
+}
+.update-table td, .static-table td {
+  padding: 12px 18px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.update-table tr:nth-child(even) td,
+.static-table tr:nth-child(even) td { background: var(--cream); }
+.static-table td:first-child { font-weight: 700; }
+.static-table tfoot td {
+  background: var(--ink); color: #fff; font-weight: 800; padding: 12px 18px;
+}
+
+.section-label {
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--muted); margin: 38px 0 18px;
+  border-left: 4px solid var(--ink);
+  padding-left: 12px;
+}
+
+/* ═══════════════════════════════════════════════
+   COVER PAGE
+═══════════════════════════════════════════════ */
+.cover-page .page-inner {
+  display: flex; flex-direction: column;
+  justify-content: space-between; padding: 0; min-height: 860px;
+}
+
+/* dark gradient header band */
+.cover-header {
+  background:white;
+  position: relative; overflow: hidden;
+  min-height: auto;
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.cover-header::before {
+  content: ''; position: absolute; top: -70px; right: -70px;
+  width: 320px; height: 320px;
+  border: 1px solid rgba(255,255,255,.05); border-radius: 50%;
+}
+.cover-header::after {
+  content: ''; position: absolute; bottom: -80px; left: 28%;
+  width: 220px; height: 220px;
+  border: 1px solid rgba(255,255,255,.04); border-radius: 50%;
+}
+
+.cover-logo-bar {
+  padding: 20px 52px;
+  display: flex; align-items: center; gap: 12px;
+  border-bottom: 1px solid rgba(255,255,255,.09);
+  position: relative; z-index: 2;
+}
+.cover-logo-circle {
+  width: 36px; height: 36px;
+  border: 1.5px solid rgba(255,255,255,.5); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Serif Display', serif; font-size: 16px; color: #fff;
+}
+.cover-logo-name {
+  font-family: 'Syne', sans-serif; font-size: 11px;
+  font-weight: 600; letter-spacing: .1em;
+  color: rgba(19, 18, 18, 0.65); text-transform: uppercase;
+}
+
+.cover-title-block {
+  padding: 18px 52px 22px; position: relative; z-index: 2;
+}
+.cover-doc-type {
+  font-family: 'DM Mono', monospace; font-size: 9px;
+  letter-spacing: .28em; text-transform: uppercase;
+  color: rgba(100,100,100,.6); margin-bottom: 8px;
+}
+.cover-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 44px; line-height: 1.1; color: #0a0a0a; margin-bottom: 4px;
+  word-break: break-word;
+}
+.cover-subtitle {
+  font-family: 'DM Serif Display', serif;
+  font-size: 18px; color: rgba(60,60,60,.55); font-style: italic;
+}
+
+/* meta body */
+.cover-body {
+  padding: 28px 52px; flex: 1;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-content: start;
+}
+.cover-meta-group h4 {
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .2em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 11px;
+  border-bottom: 1px solid var(--border); padding-bottom: 6px;
+}
+.cover-meta-row {
+  display: flex; justify-content: space-between;
+  font-size: 11.5px; padding: 5px 0; border-bottom: 1px solid var(--cream);
+}
+.cover-meta-row span:first-child { color: var(--muted); }
+.cover-meta-row span:last-child { font-weight: 500; }
+
+.cover-stack {
+  grid-column: 1 / -1;
+  padding: 16px 0 8px; border-top: 1.5px solid var(--border);
+}
+.cover-stack h4 {
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .2em; text-transform: uppercase;
+  color: var(--ink); margin-bottom: 12px;
+}
+.tech-pills {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;
+}
+.tech-pill {
+  background: #f5f5f0; color: var(--ink);
+  font-size: 10px; padding: 6px 12px; letter-spacing: .03em;
+  font-family: 'DM Mono', monospace;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cover-footer {
+  background: var(--cream); border-top: 2px solid var(--border);
+  padding: 18px 52px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10px; color: var(--muted); letter-spacing: .05em;
+}
+.cover-footer .confidential {
+  background: var(--ink); color: #fff;
+  padding: 4px 12px; font-size: 9px; letter-spacing: .15em; text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════
+   TABLE OF CONTENTS
+═══════════════════════════════════════════════ */
+.toc-page-title {
+  font-family: 'DM Serif Display', serif; font-size: 30px; margin-bottom: 7px;
+}
+.toc-page-subtitle {
+  font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted);
+  letter-spacing: .08em; margin-bottom: 26px;
+  padding-bottom: 14px; border-bottom: 2px solid var(--ink);
+}
+.toc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.toc-table thead tr { background: var(--ink); color: #fff; }
+.toc-table thead th {
+  padding: 10px 14px; text-align: left;
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .15em; text-transform: uppercase; font-weight: 600;
+}
+.toc-table thead th:last-child { text-align: center; width: 60px; }
+.toc-table tbody tr { border-bottom: 1px solid var(--cream); }
+.toc-table tbody tr:nth-child(even) { background: var(--cream); }
+.toc-table tbody tr:hover { background: #eee; }
+.toc-table td { padding: 10px 14px; vertical-align: middle; }
+.toc-table td:first-child {
+  font-family: 'DM Mono', monospace; font-size: 10px; color: var(--ink);
+  letter-spacing: .1em; text-transform: uppercase; font-weight: 500; width: 120px;
+}
+.toc-table td:nth-child(2) { font-family: 'Syne', sans-serif; font-weight: 600; }
+.toc-table td:nth-child(2) a { color: var(--ink); text-decoration: none; }
+.toc-table td:nth-child(2) a:hover { text-decoration: underline; }
+.toc-table td:last-child {
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  color: var(--muted); text-align: center; width: 60px;
+}
+
+/* ═══════════════════════════════════════════════
+   CHAPTER HEADERS
+═══════════════════════════════════════════════ */
+/* Chapter headers */
+.ch-header {
+  /* border-bottom: 3px solid var(--ink); */
+  padding-bottom: 22px; margin-bottom: 48px;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  /* background: linear-gradient(90deg, #f5f5f4 60%, #e0e0e0 100%); */
+  border-radius: 0 0 8px 8px;
+}
+.ch-header-left .ch-num {
+  font-family: 'DM Mono', monospace; font-size: 12px;
+  letter-spacing: .2em; color: var(--ink); text-transform: uppercase;
+  margin-bottom: 7px; font-weight: 800;
+}
+.ch-header-left .ch-title {
+  font-family: 'DM Serif Display', serif; font-size: 34px; line-height: 1.1;
+}
+.ch-subtitle {
+  font-family: 'DM Mono', monospace; font-size: 12px;
+  color: var(--muted); max-width: 300px; text-align: right; line-height: 1.55;
+}
+
+/* ═══════════════════════════════════════════════
+   TYPOGRAPHY
+═══════════════════════════════════════════════ */
+h2 {
+  font-family: 'Syne', sans-serif; font-size: 11.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink);
+  margin: 30px 0 12px; padding-bottom: 5px; border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-family: 'DM Serif Display', serif; font-size: 16px; margin: 20px 0 9px;
+}
+h4.sub {
+  font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 14px 0 7px;
+}
+p { color: #333; margin-bottom: 11px; font-size: 12.5px; line-height: 1.74; }
+
+/* ═══════════════════════════════════════════════
+   DATA TABLES  (brd-table)
+═══════════════════════════════════════════════ */
+.brd-table {
+  width: 100%; border-collapse: collapse;
+  margin: 16px 0 26px; font-size: 11.5px; table-layout: fixed;
+}
+.brd-table thead tr { background: var(--ink); color: #fff; }
+.brd-table thead th {
+  padding: 10px 14px; text-align: left;
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .15em; text-transform: uppercase; font-weight: 600;
+}
+.brd-table tbody tr:nth-child(even) { background: var(--cream); }
+.brd-table tbody tr:hover { background: #eee; }
+.brd-table td {
+  padding: 9px 14px; border-bottom: 1px solid var(--border);
+  vertical-align: top; line-height: 1.55;
+  overflow-wrap: break-word; word-break: break-word;
+}
+.brd-table td:first-child { font-weight: 500; color: var(--ink); }
+
+/* ═══════════════════════════════════════════════
+   CALLOUTS
+═══════════════════════════════════════════════ */
+.callout {
+  padding: 14px 18px; margin: 14px 0;
+  font-size: 12px; line-height: 1.65;
+  border-left: 4px solid var(--ink); background: var(--cream);
+}
+.callout.warn  { border-color: #c0392b; background: #fdf7f6; }
+.callout.info  { border-color: #2471a3; background: #f4f8fc; }
+.callout.gold  { border-color: #b8960c; background: #fdfbf3; }
+.callout strong {
+  font-family: 'Syne', sans-serif; font-size: 9px; letter-spacing: .15em;
+  text-transform: uppercase; display: block; margin-bottom: 5px;
+}
+
+/* ═══════════════════════════════════════════════
+   SCOPE GRID
+═══════════════════════════════════════════════ */
+.scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 14px 0 22px; }
+.scope-box { padding: 14px 18px; background: var(--cream); }
+.scope-box.in-scope  { border-top: 3px solid var(--ink); }
+.scope-box.out-scope { border-top: 3px solid #888; }
+.scope-box h4 {
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .18em; text-transform: uppercase; margin-bottom: 10px; font-weight: 700;
+}
+.scope-box.in-scope  h4 { color: var(--ink); }
+.scope-box.out-scope h4 { color: #666; }
+.scope-item { display: flex; gap: 8px; margin-bottom: 7px; font-size: 11.5px; line-height: 1.45; }
+.scope-mark { flex-shrink: 0; font-weight: 700; }
+.scope-box.in-scope  .scope-mark { color: var(--ink); }
+.scope-box.out-scope .scope-mark { color: #888; }
+
+/* ═══════════════════════════════════════════════
+   MODULE CARDS
+═══════════════════════════════════════════════ */
+.module-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 13px; margin: 14px 0 22px; }
+.module-card { border: 1px solid var(--border); padding: 14px 16px; background: #fff; }
+.module-card h4 {
+  font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .05em; color: var(--ink); margin-bottom: 5px;
+}
+.module-card p { font-size: 11px; color: var(--muted); margin: 0; }
+.module-tag {
+  display: inline-block; background: var(--cream);
+  font-size: 9px; padding: 2px 8px; margin-top: 7px;
+  color: var(--muted); letter-spacing: .05em; border: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════
+   ARCHITECTURE DIAGRAM
+═══════════════════════════════════════════════ */
+.full-arch {
+  margin: 20px 0; padding: 26px 18px 20px; background: #fff;
+  border: 1px solid var(--border); border-top: 4px solid var(--ink);
+}
+.full-arch-title {
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+  text-align: center; margin-bottom: 18px; color: var(--ink);
+}
+.arch-section {
+  margin-bottom: 5px; padding: 11px 15px;
+  border: 1px solid var(--border); position: relative;
+}
+.arch-section-label {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .15em; text-transform: uppercase;
+  margin-bottom: 7px; display: flex; align-items: center; gap: 8px;
+}
+.arch-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.arch-card {
+  padding: 6px 13px; font-size: 11px; font-family: 'DM Mono', monospace;
+  border: 1px solid var(--border); background: #fff; border-radius: 3px; white-space: nowrap;
+}
+
+/* layer colour themes */
+.arch-section.s-actor   { background: #f9f9f9; }
+.arch-section.s-actor   .arch-section-label { color: var(--ink); }
+.arch-section.s-actor   .arch-card { background: #f0f0f0; border-color: #bbb; }
+
+.arch-section.s-ui      { background: #f5f5f5; }
+.arch-section.s-ui      .arch-card { background: #eee; border-color: #ccc; }
+
+.arch-section.s-biz     { background: #fafafa; }
+.arch-section.s-biz     .arch-card { background: #f5f5f5; border-color: #ccc; }
+
+.arch-section.s-data-access { background: #f1f1f1; }
+.arch-section.s-data-access .arch-card { background: #eee; border-color: #bbb; }
+
+.arch-section.s-data    { background: var(--ink); }
+.arch-section.s-data    .arch-section-label { color: #ccc; }
+.arch-section.s-data    .arch-card { background: #222; border-color: #444; color: #ddd; }
+
+.arch-section.s-ext     { background: #f0f0f0; border-style: dashed; }
+.arch-section.s-ext     .arch-section-label { color: #555; }
+.arch-section.s-ext     .arch-card { background: #e8e8e8; border-color: #aaa; }
+
+.arch-section.s-deploy  { background: #f8f8f8; }
+.arch-section.s-deploy  .arch-card { background: #f0f0f0; border-color: #bbb; }
+
+.arch-connector {
+  text-align: center; font-size: 13px; color: var(--ink);
+  padding: 3px 0; letter-spacing: 3px;
+}
+.arch-fig-caption {
+  text-align: center; margin-top: 13px;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  color: var(--muted); letter-spacing: .08em; text-transform: uppercase;
+}
+.arch-legend {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+  justify-content: center;
+}
+.arch-legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted);
+}
+.arch-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════
+   FLOWCHART (Activity / Process Flow)
+   — Professional PDF-style vertical flowchart
+   — All nodes on ONE vertical centre-line
+═══════════════════════════════════════════════ */
+.flowchart {
+  display: flex; flex-direction: column; align-items: center;
+  margin: 24px auto; padding: 32px 20px 26px;
+  background: #fff; border: 1.5px solid #d0d0d0; border-radius: 6px;
+  width: 480px; max-width: 100%;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  page-break-inside: avoid;
+}
+.flowchart-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 22px; text-align: center; width: 100%;
+}
+
+/* ── base node ── */
+.fc-node {
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Mono', monospace; font-size: 10.5px;
+  text-align: center; line-height: 1.5;
+  min-height: 38px; padding: 9px 18px;
+  box-sizing: border-box;
+  width: 400px;                          /* FIXED width — never shrinks/grows */
+}
+
+/* ── START pill ── */
+.fc-node.fc-start {
+  background: var(--ink); color: #fff; border-radius: 24px;
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
+  width: 200px; padding: 10px 36px;
+}
+
+/* ── END pill ── */
+.fc-node.fc-end {
+  background: #6b3a2a; color: #fff; border-radius: 24px;
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
+  width: 200px; padding: 10px 36px;
+}
+
+/* ── Step box ── */
+.fc-node.fc-step {
+  background: #f8f7f4; border: 2px solid var(--ink); border-radius: 8px;
+  color: var(--ink);
+  width: 400px;                          /* exactly same as base — no zig-zag */
+  padding: 11px 20px;
+  justify-content: flex-start;           /* badge + text left-aligned inside */
+  text-align: left;
+}
+
+/* ── Decision diamond ── */
+.fc-node.fc-decision {
+  background: #fff; border: 2px solid var(--ink);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  padding: 24px 56px; font-size: 10px; width: 260px;
+}
+
+/* ── Step number badge ── */
+.fc-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--ink); color: #fff;
+  font-size: 9px; font-weight: 700;
+  width: 22px; height: 22px; border-radius: 50%;
+  margin-right: 10px; flex-shrink: 0;
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── Arrow connector — NO width, just centred by parent ── */
+.fc-arrow {
+  display: flex; flex-direction: column; align-items: center;
+  height: 26px; justify-content: center;
+}
+.fc-arrow::before {
+  content: ''; display: block; width: 2px; height: 14px; background: var(--ink);
+}
+.fc-arrow::after {
+  content: ''; display: block; width: 0; height: 0;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-top: 7px solid var(--ink); margin-top: -1px;
+}
+.fc-arrow-label {
+  font-family: 'DM Mono', monospace; font-size: 9px; color: var(--muted);
+  margin: 2px 0; letter-spacing: .05em;
+}
+
+/* ═══════════════════════════════════════════════
+   DATABASE / ER SCHEMA
+═══════════════════════════════════════════════ */
+.er-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px; margin: 18px 0;
+}
+.er-table { border: 1px solid var(--border); overflow: hidden; }
+.er-table-head {
+  padding: 8px 12px; font-family: 'Syne', sans-serif;
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+}
+.er-table-head.dark  { background: var(--ink);  color: #fff; }
+.er-table-head.mid   { background: #444444;      color: #fff; }
+.er-table-head.light { background: #777777;      color: #fff; }
+.er-table-head.ref   { background: #2d5986;      color: #fff; }
+
+.er-field {
+  padding: 5px 12px; font-size: 10.5px;
+  border-bottom: 1px solid var(--cream);
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
+}
+.er-field:last-child { border-bottom: none; }
+.er-field .fname { flex: 1; font-family: 'DM Mono', monospace; }
+.er-field .ftype { color: var(--muted); font-size: 9.5px; white-space: nowrap; flex-shrink: 0; }
+.er-field .pk { font-weight: 700; color: var(--ink); }
+.er-field .fk { font-style: italic; color: #555; }
+
+.badge-pk {
+  display: inline-block; font-size: 8px; padding: 1px 5px;
+  background: var(--ink); color: #fff; font-weight: 700;
+  letter-spacing: .04em; font-family: 'DM Mono', monospace;
+  margin-right: 3px; vertical-align: middle;
+}
+.badge-fk {
+  display: inline-block; font-size: 8px; padding: 1px 5px;
+  background: #666; color: #fff; font-weight: 700;
+  letter-spacing: .04em; font-family: 'DM Mono', monospace;
+  margin-right: 3px; vertical-align: middle;
+}
+.er-fig-caption {
+  text-align: center; margin-top: 12px;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  color: var(--muted); letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════
+   SEQUENCE DIAGRAMS
+═══════════════════════════════════════════════ */
+.seq-diagram { margin: 18px 0; border: 1px solid var(--border); overflow: hidden; }
+.seq-actors { display: flex; background: var(--ink); color: #fff; }
+.seq-actor {
+  flex: 1; text-align: center; padding: 9px 7px;
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase;
+  border-right: 1px solid rgba(255,255,255,.12);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.seq-actor:last-child { border-right: none; }
+.seq-row {
+  display: flex; border-bottom: 1px solid var(--border);
+  font-size: 10.5px; align-items: stretch;
+}
+.seq-row:last-child { border-bottom: none; }
+.seq-row:nth-child(even) { background: var(--cream); }
+.seq-cell {
+  flex: 1; padding: 7px 9px;
+  border-right: 1px dashed var(--border);
+  min-height: 34px; display: flex; align-items: center;
+}
+.seq-cell:last-child { border-right: none; }
+.seq-msg {
+  background: var(--ink); color: #fff;
+  font-size: 9.5px; padding: 2px 8px; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  font-family: 'DM Mono', monospace;
+}
+.seq-msg.ret { background: #555; }
+.seq-msg.ext { background: #333; border: 1px dashed #777; }
+
+/* ═══════════════════════════════════════════════
+   BUSINESS RULES
+═══════════════════════════════════════════════ */
+.biz-rule {
+  margin: 12px 0; padding: 14px 18px;
+  background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--ink);
+}
+.biz-rule-id {
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  color: var(--ink); letter-spacing: .1em; font-weight: 700; margin-bottom: 3px;
+}
+.biz-rule-title {
+  font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; margin-bottom: 5px;
+}
+.biz-rule-desc { font-size: 11.5px; color: #444; line-height: 1.62; }
+.biz-rule-impact { margin-top: 7px; font-size: 10px; color: var(--muted); }
+.biz-rule-impact strong { color: var(--ink); }
+
+/* ═══════════════════════════════════════════════
+   APPLICATION FLOW / USER JOURNEY
+   — Professional PDF-style horizontal flow
+═══════════════════════════════════════════════ */
+.app-flow {
+  margin: 22px 0; padding: 24px 20px 20px;
+  background: #fff; border: 1.5px solid #d0d0d0; border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  page-break-inside: avoid;
+}
+.app-flow-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink); text-align: center; margin-bottom: 20px;
+}
+.app-flow-track {
+  display: flex; align-items: flex-start;
+  justify-content: center; flex-wrap: nowrap; gap: 0;
+  overflow: visible;
+}
+.app-screen {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 88px; max-width: 108px; flex-shrink: 0;
+}
+.app-screen-icon {
+  width: 48px; height: 48px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; margin-bottom: 8px;
+  border: 2px solid var(--ink); background: #f8f7f4; color: var(--ink);
+}
+.app-screen-icon.s-db  { background: var(--ink); color: #fff; }
+.app-screen-icon.s-err { border-color: #888; color: #888; }
+.app-screen-name {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase; text-align: center; line-height: 1.3;
+  max-width: 102px; word-wrap: break-word;
+}
+.app-screen-desc { font-size: 9px; color: var(--muted); text-align: center; margin-top: 3px; line-height: 1.3; max-width: 102px; }
+.app-flow-arrow {
+  display: flex; align-items: center; padding: 0 2px;
+  margin-top: 16px; position: relative; flex-shrink: 0;
+}
+.app-flow-arrow::before { content: ''; display: block; width: 18px; height: 2px; background: var(--ink); }
+.app-flow-arrow::after {
+  content: ''; display: block; width: 0; height: 0;
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--ink);
+}
+
+/* ═══════════════════════════════════════════════
+   USE CASES
+═══════════════════════════════════════════════ */
+.use-case-card {
+  margin: 14px 0; padding: 16px 18px;
+  background: #fff; border: 1px solid var(--border);
+}
+.use-case-id {
+  font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .1em;
+  color: var(--muted); margin-bottom: 4px;
+}
+.use-case-title {
+  font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700;
+  color: var(--ink); margin-bottom: 8px;
+}
+.use-case-meta {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-bottom: 10px; font-size: 11px;
+}
+.use-case-meta-item span:first-child { color: var(--muted); margin-right: 6px; }
+.use-case-steps { font-size: 11.5px; counter-reset: uc-step; }
+.use-case-step {
+  counter-increment: uc-step; padding: 4px 0 4px 22px;
+  position: relative; border-bottom: 1px solid var(--cream); line-height: 1.5;
+}
+.use-case-step::before {
+  content: counter(uc-step);
+  position: absolute; left: 0;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--ink); color: #fff;
+  font-size: 8px; font-weight: 700; font-family: 'DM Mono', monospace;
+  display: flex; align-items: center; justify-content: center; top: 5px;
+}
+.use-case-step:last-child { border-bottom: none; }
+
+/* ═══════════════════════════════════════════════
+   CLASS / OBJECT MODEL
+═══════════════════════════════════════════════ */
+.class-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 18px 0; }
+.class-card { border: 1px solid var(--border); overflow: hidden; }
+.class-card-head {
+  background: var(--ink); color: #fff; padding: 8px 13px;
+  font-family: 'Syne', sans-serif; font-size: 10.5px; font-weight: 700;
+}
+.class-card-head span {
+  display: block; font-size: 9px; font-weight: 400;
+  color: rgba(255,255,255,.55); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px;
+}
+.class-section-title {
+  background: var(--cream); padding: 4px 12px;
+  font-family: 'Syne', sans-serif; font-size: 9px;
+  font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); border-bottom: 1px solid var(--border);
+}
+.class-field {
+  padding: 5px 12px; font-size: 10.5px; font-family: 'DM Mono', monospace;
+  border-bottom: 1px solid var(--cream);
+  display: flex; justify-content: space-between;
+}
+.class-field:last-child { border-bottom: none; }
+.class-field .ftype { color: var(--muted); font-size: 9.5px; }
+
+/* ═══════════════════════════════════════════════
+   INTEGRATION POINTS
+═══════════════════════════════════════════════ */
+.integration-card {
+  margin: 12px 0; padding: 15px 18px;
+  background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--ink);
+}
+.integration-card.outbound { border-left-color: #555; }
+.integration-card.ext      { border-left-color: #888; border-left-style: dashed; }
+.integration-tag {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .15em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;
+}
+.integration-title {
+  font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500;
+  color: var(--ink); margin-bottom: 8px;
+}
+.integration-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px; }
+.integration-meta-row { font-size: 11px; }
+.integration-meta-row span:first-child { color: var(--muted); margin-right: 6px; }
+.integration-desc { font-size: 11.5px; color: #444; line-height: 1.62; }
+
+/* ═══════════════════════════════════════════════
+   NFR (Non-Functional Requirements)
+═══════════════════════════════════════════════ */
+.nfr-card {
+  margin: 10px 0; padding: 13px 17px;
+  background: #fff; border: 1px solid var(--border);
+}
+.nfr-card-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 12px;
+  color: var(--ink); margin-bottom: 6px;
+}
+.nfr-list { list-style: none; }
+.nfr-list li {
+  padding: 5px 0; border-bottom: 1px solid var(--cream);
+  font-size: 11.5px; display: flex; gap: 8px; align-items: baseline;
+}
+.nfr-list li:last-child { border-bottom: none; }
+.nfr-list li::before { content: '▸'; color: var(--ink); flex-shrink: 0; font-size: 10px; }
+
+/* ═══════════════════════════════════════════════
+   RISK REGISTER
+═══════════════════════════════════════════════ */
+.risk-item {
+  margin: 10px 0; padding: 13px 17px;
+  background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--risk-hi);
+}
+.risk-item.med { border-left-color: var(--risk-med); }
+.risk-item.low { border-left-color: var(--risk-lo); }
+.risk-severity {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .15em; text-transform: uppercase; margin-bottom: 3px;
+}
+.risk-severity.hi  { color: var(--risk-hi); }
+.risk-severity.med { color: var(--risk-med); }
+.risk-severity.low { color: var(--risk-lo); }
+.risk-title {
+  font-family: 'DM Mono', monospace; font-size: 12px;
+  font-weight: 500; margin-bottom: 5px; color: var(--ink);
+}
+.risk-desc { font-size: 11.5px; color: #444; line-height: 1.6; }
+.risk-mitigation { margin-top: 6px; font-size: 11px; color: var(--muted); }
+.risk-mitigation strong { color: var(--ink); }
+
+/* ═══════════════════════════════════════════════
+   DEAD CODE ANALYSIS
+═══════════════════════════════════════════════ */
+.dead-code-summary {
+  display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin: 14px 0 22px;
+}
+.dead-stat {
+  background: var(--cream); border: 1px solid var(--border);
+  padding: 14px 16px; text-align: center;
+}
+.dead-stat .val {
+  font-family: 'DM Serif Display', serif; font-size: 30px;
+  color: var(--ink); display: block; margin-bottom: 4px;
+}
+.dead-stat .lbl {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+
+.dead-code-bar { margin: 9px 0; }
+.dead-code-label {
+  display: flex; justify-content: space-between;
+  font-size: 10.5px; margin-bottom: 3px;
+}
+.dead-code-label .prog { font-family: 'DM Mono', monospace; color: var(--ink); }
+.dead-code-label .pct  { font-weight: 700; color: var(--ink); }
+.dead-code-track { height: 8px; background: var(--cream); border: 1px solid var(--border); }
+.dead-code-fill  { height: 100%; background: var(--ink); }
+
+/* ═══════════════════════════════════════════════
+   PRODUCTION BEHAVIOUR
+═══════════════════════════════════════════════ */
+.prod-stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 14px 0 22px; }
+.prod-stat {
+  background: var(--cream); border: 1px solid var(--border); padding: 14px 16px;
+}
+.prod-stat .pval {
+  font-family: 'DM Serif Display', serif; font-size: 26px;
+  color: var(--ink); display: block; margin-bottom: 4px;
+}
+.prod-stat .plbl {
+  font-family: 'Syne', sans-serif; font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+
+/* ═══════════════════════════════════════════════
+   SECURITY CHECKLIST
+═══════════════════════════════════════════════ */
+.check-list { list-style: none; margin: 9px 0; }
+.check-list li {
+  display: flex; gap: 9px; padding: 5px 0;
+  border-bottom: 1px solid var(--cream); font-size: 11.5px; align-items: baseline;
+}
+.check-list li:last-child { border-bottom: none; }
+.check-mark { font-size: 12px; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════
+   API DESIGN
+═══════════════════════════════════════════════ */
+.api-group { margin-bottom: 26px; }
+.api-group-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px;
+  padding: 7px 15px; background: var(--cream);
+  border-left: 3px solid var(--ink); margin-bottom: 9px; letter-spacing: .04em;
+}
+.api-endpoint {
+  margin: 8px 0; padding: 11px 15px;
+  border: 1px solid var(--border); background: #fff;
+}
+.api-path { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; margin-left: 8px; }
+.api-desc  { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+
+.method-badge {
+  display: inline-block; font-size: 9px; padding: 2px 8px;
+  font-weight: 700; letter-spacing: .05em; font-family: 'DM Mono', monospace;
+}
+.method-get    { background: #eee; color: var(--ink); border: 1px solid #bbb; }
+.method-post   { background: var(--ink); color: #fff; }
+.method-put    { background: #ddd; color: var(--ink); border: 1px solid #aaa; }
+.method-patch  { background: #e8e8e8; color: var(--ink); border: 1px solid #bbb; }
+.method-delete { background: #555; color: #fff; }
+
+/* ═══════════════════════════════════════════════
+   REPOSITORY FILE GUIDE
+═══════════════════════════════════════════════ */
+.file-group { margin-bottom: 22px; }
+.file-group-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 7px 14px; background: var(--ink); color: #fff; margin-bottom: 0;
+}
+.file-row {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 7px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px;
+}
+.file-row:nth-child(even) { background: var(--cream); }
+.file-row .fname { font-family: 'DM Mono', monospace; color: var(--ink); flex-shrink: 0; min-width: 200px; }
+.file-row .fdesc { color: #444; line-height: 1.5; }
+
+/* ═══════════════════════════════════════════════
+   PHASE / TIMELINE
+═══════════════════════════════════════════════ */
+.phase-list { margin: 18px 0; border-left: 2px solid var(--ink); padding-left: 22px; }
+.phase-item { position: relative; margin-bottom: 22px; }
+.phase-item::before {
+  content: ''; position: absolute; left: -29px; top: 5px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--ink); border: 2px solid var(--paper); box-shadow: 0 0 0 2px var(--ink);
+}
+.phase-num {
+  font-family: 'DM Mono', monospace; font-size: 9px;
+  color: var(--ink); letter-spacing: .15em; text-transform: uppercase; margin-bottom: 3px;
+}
+.phase-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 13px; margin-bottom: 3px; }
+.phase-desc  { font-size: 11.5px; color: #444; line-height: 1.6; }
+
+/* ═══════════════════════════════════════════════
+   CODE BLOCK
+═══════════════════════════════════════════════ */
+.code-block {
+  background: #1a1a1a; color: #ccc;
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  padding: 18px 22px; margin: 14px 0 22px;
+  line-height: 1.74; overflow-x: auto;
+  border-left: 3px solid #666;
+  white-space: pre-wrap; word-break: break-word;
+}
+code {
+  background: var(--cream); padding: 1px 5px; font-size: 11px;
+  border: 1px solid var(--border); font-family: 'DM Mono', monospace; color: var(--ink);
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* ═══════════════════════════════════════════════
+   GLOSSARY
+═══════════════════════════════════════════════ */
+.glossary-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; margin: 14px 0; }
+.glossary-item { padding: 10px 13px; background: #fff; border: 1px solid var(--border); }
+.glossary-term { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; color: var(--ink); margin-bottom: 3px; }
+.glossary-def  { font-size: 11px; color: #555; line-height: 1.55; overflow-wrap: break-word; }
+
+/* ═══════════════════════════════════════════════
+   BADGES
+═══════════════════════════════════════════════ */
+.badge { display: inline-block; font-size: 9px; padding: 2px 8px; font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.badge-critical { background: var(--ink); color: #fff; }
+.badge-high     { background: #c0392b;    color: #fff; }
+.badge-medium   { background: #e67e22;    color: #fff; }
+.badge-low      { background: #ccc;       color: var(--ink); }
+.badge-done     { background: var(--ink); color: #fff; }
+
+/* ═══════════════════════════════════════════════
+   PRINT
+═══════════════════════════════════════════════ */
+@media print {
+  html, body { 
+    width: 210mm; 
+    margin: 0 !important; 
+    padding: 0 !important;
+    background: white !important;
+  }
+  .doc-wrapper { 
+    padding: 0 !important; 
+    margin: 0 !important;
+    width: 210mm !important;
+  }
+  .page { 
+    break-after: always; 
+    box-shadow: none !important; 
+    margin: 0 !important; 
+    padding: 0 !important;
+    width: 210mm !important; 
+    max-width: 210mm !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+    border-radius: 0 !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+  }
+  .page-inner { 
+    width: 100% !important; 
+    padding: 15mm 20mm !important;
+    min-height: auto !important;
+  }
+  .pg-num { bottom: 10mm; right: 15mm; }
+  .pg-watermark { bottom: 10mm; left: 15mm; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+
+</style>
+</head>
+<body>
+<div class="doc-wrapper">
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE 01 — DISCLAIMER  (mirrors PDF first page exactly)
+═══════════════════════════════════════════════════════════════ -->
+<div class="page disclaimer-page" id="disclaimer">
+<div class="page-inner">
+
+  <!-- Organisation logo bar -->
+  <div class="org-logo-bar">
+    <div class="org-logo-circle">{{ORG_INITIAL}}</div>
+    <div class="org-logo-name">{{ORG_NAME}}</div>
+  </div>
+
+  <!-- Italic disclaimer block -->
+  <div class="disclaimer-block">
+    Disclaimer: This document provides a high-fidelity baseline of application architecture,
+    synthesized by {{TOOL_NAME}} through a rigorous analysis of the source code. It is designed
+    to significantly accelerate the comprehension process by providing a structured foundation
+    for modernization. Because applications reflect architectural implementation rather than
+    original system design, this document is intended as a collaborative draft. We encourage
+    Subject Matter Experts (SMEs) to review, refine, and validate these requirements to
+    ensure they perfectly capture the nuanced business goals of the current landscape.
+  </div>
+
+  <!-- Document heading -->
+  <div class="disclaimer-doc-title">
+    Application Overview Document for Modernization:<br>
+    {{REPO_NAME}} — {{APP_FULL_NAME}}
+  </div>
+
+  <!-- Update tracking -->
+  <div class="section-label">Update Tracking</div>
+  <table class="update-table">
+    <thead>
+      <tr><th style="width:70px">Sr. No.</th><th style="width:140px">Update Date</th><th>Remarks</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>{{UPDATE_DATE_1}}</td><td>{{UPDATE_REMARK_1}}</td></tr>
+      <!-- <tr><td>2</td><td>{{UPDATE_DATE_2}}</td><td>{{UPDATE_REMARK_2}}</td></tr> -->
+      <!-- Add more rows as needed -->
+    </tbody>
+  </table>
+
+  <!-- Static code analysis -->
+  <div class="section-label">Static Code Analysis</div>
+  <table class="static-table">
+    <thead>
+      <tr>
+        <th>Program Type</th><th>Physical Files</th><th>Used Files</th>
+        <th>Orphan Files</th><th>Physical LOC</th><th>Used LOC</th><th>Orphan LOC</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Row per program type: COBOL, Copybooks, JCL, Java, Python, etc. -->
+      <tr><td>{{PROG_TYPE_1}}</td><td>{{PHY_FILES_1}}</td><td>{{USED_FILES_1}}</td><td>{{ORPH_FILES_1}}</td><td>{{PHY_LOC_1}}</td><td>{{USED_LOC_1}}</td><td>{{ORPH_LOC_1}}</td></tr>
+      <tr><td>{{PROG_TYPE_2}}</td><td>{{PHY_FILES_2}}</td><td>{{USED_FILES_2}}</td><td>{{ORPH_FILES_2}}</td><td>{{PHY_LOC_2}}</td><td>{{USED_LOC_2}}</td><td>{{ORPH_LOC_2}}</td></tr>
+      <tr><td>{{PROG_TYPE_3}}</td><td>{{PHY_FILES_3}}</td><td>{{USED_FILES_3}}</td><td>{{ORPH_FILES_3}}</td><td>{{PHY_LOC_3}}</td><td>{{USED_LOC_3}}</td><td>{{ORPH_LOC_3}}</td></tr>
+    </tbody>
+    <tfoot>
+      <tr><td>Total</td><td>{{TOTAL_PHY}}</td><td>{{TOTAL_USED}}</td><td>{{TOTAL_ORPH}}</td><td>{{TOTAL_PHY_LOC}}</td><td>{{TOTAL_USED_LOC}}</td><td>{{TOTAL_ORPH_LOC}}</td></tr>
+    </tfoot>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">01</div>
+</div><!-- /disclaimer-page -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE 02 — COVER  (dark gradient header matching PDF style)
+═══════════════════════════════════════════════════════════════ -->
+<div class="page cover-page" id="cover">
+<div class="page-inner">
+
+  <!-- Dark header band -->
+  <div class="cover-header">
+    <div class="cover-logo-bar">
+      <div class="cover-logo-circle">{{ORG_INITIAL}}</div>
+      <div class="cover-logo-name">{{ORG_NAME}}</div>
+    </div>
+    <div class="cover-title-block">
+      <div class="cover-doc-type">Technical Document · Application Overview for Modernization</div>
+      <div class="cover-title">{{REPO_NAME}}</div>
+      <div class="cover-subtitle">{{APP_FULL_NAME}}</div>
+    </div>
+  </div>
+
+  <!-- Meta grid -->
+  <div class="cover-body">
+
+    <div class="cover-meta-group">
+      <h4>Document Control</h4>
+      <div class="cover-meta-row"><span>Document ID</span><span>TD-{{REPO_NAME}}-001</span></div>
+      <div class="cover-meta-row"><span>Version</span><span>v{{DOC_VERSION}} — {{DOC_STATUS}}</span></div>
+      <div class="cover-meta-row"><span>Date</span><span>{{DOC_DATE}}</span></div>
+      <div class="cover-meta-row"><span>Classification</span><span>CONFIDENTIAL</span></div>
+    </div>
+
+    <div class="cover-meta-group">
+      <h4>Repository</h4>
+      <div class="cover-meta-row"><span>URL</span><span style="word-break:break-all">{{REPO_URL}}</span></div>
+      <div class="cover-meta-row"><span>Primary Language</span><span style="background:var(--ink);color:#fff;padding:2px 10px;font-weight:700">{{PRIMARY_LANG}}</span></div>
+      <div class="cover-meta-row"><span>Platform</span><span>{{PLATFORM}}</span></div>
+      <div class="cover-meta-row"><span>Environment</span><span>{{ENVIRONMENT}}</span></div>
+    </div>
+
+    <!-- Technology stack pills -->
+    <div class="cover-stack">
+      <h4>Technology Stack
+        <span style="display:inline-block;background:var(--ink);color:#fff;font-family:'DM Mono',monospace;font-size:10px;padding:2px 10px;letter-spacing:.08em;margin-left:8px;vertical-align:middle">{{PRIMARY_LANG}}</span>
+      </h4>
+      <div class="tech-pills">
+        <!-- Replace each pill with actual technology name -->
+        <span class="tech-pill">{{TECH_1}}</span>
+        <span class="tech-pill">{{TECH_2}}</span>
+        <span class="tech-pill">{{TECH_3}}</span>
+        <span class="tech-pill">{{TECH_4}}</span>
+        <span class="tech-pill">{{TECH_5}}</span>
+        <span class="tech-pill">{{TECH_6}}</span>
+        <span class="tech-pill">{{TECH_7}}</span>
+        <span class="tech-pill">{{TECH_8}}</span>
+      </div>
+    </div>
+
+  </div><!-- /cover-body -->
+
+  <div class="cover-footer">
+    <span>© {{DOC_DATE}} · {{ORG_NAME}} · {{REPO_NAME}} · For Internal Use Only</span>
+    <span class="confidential">Confidential</span>
+  </div>
+
+</div>
+</div><!-- /cover-page -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE 03 — TABLE OF CONTENTS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="toc">
+<div class="page-inner">
+  <div class="toc-page-title">Table of Contents</div>
+  <div class="toc-page-subtitle">Application Overview Document for Modernization — {{REPO_NAME}} — v{{DOC_VERSION}}</div>
+
+  <table class="toc-table">
+    <thead><tr><th>Section</th><th>Title</th><th>Page</th></tr></thead>
+    <tbody>
+      <tr><td>Section 1</td><td><a href="#ch1">Introduction</a></td><td>04</td></tr>
+      <tr><td>Section 2</td><td><a href="#ch2">Purpose and Scope</a></td><td>05</td></tr>
+      <tr><td>Section 3</td><td><a href="#ch3">Business Functionality / Key Features</a></td><td>06</td></tr>
+      <tr><td>Section 4</td><td><a href="#ch4">High-Level Architecture</a></td><td>07</td></tr>
+      <tr><td>Section 5</td><td><a href="#ch5">Technical Stack &amp; Technologies</a></td><td>08</td></tr>
+      <tr><td>Section 6</td><td><a href="#ch6">Data Management Overview</a></td><td>09</td></tr>
+      <tr><td>Section 7</td><td><a href="#ch7">Database Schema &amp; ER Diagram</a></td><td>10</td></tr>
+      <tr><td>Section 8</td><td><a href="#ch8">Process Overview (Online &amp; Batch)</a></td><td>11</td></tr>
+      <tr><td>Section 9</td><td><a href="#ch9">Application Flow &amp; User Journey</a></td><td>12</td></tr>
+      <tr><td>Section 10</td><td><a href="#ch10">Use Case Specifications</a></td><td>13</td></tr>
+      <tr><td>Section 11</td><td><a href="#ch11">Object / Class Model</a></td><td>14</td></tr>
+      <tr><td>Section 12</td><td><a href="#ch12">Activity &amp; Process Flows</a></td><td>15</td></tr>
+      <tr><td>Section 13</td><td><a href="#ch13">Sequence Diagrams</a></td><td>16</td></tr>
+      <tr><td>Section 14</td><td><a href="#ch14">Integration Points</a></td><td>17</td></tr>
+      <tr><td>Section 15</td><td><a href="#ch15">API Design &amp; Specification</a></td><td>18</td></tr>
+      <tr><td>Section 16</td><td><a href="#ch16">Non Functional Requirements</a></td><td>19</td></tr>
+      <tr><td>Section 17</td><td><a href="#ch17">Current Risks/Challenges</a></td><td>20</td></tr>
+      <tr><td>Section 18</td><td><a href="#ch18">Repository File-by-File Guide</a></td><td>21</td></tr>
+      <tr><td>Section 19</td><td><a href="#ch19">Security, Acceptance &amp; Limitations</a></td><td>22</td></tr>
+      <tr><td>Section 20</td><td><a href="#ch20">Support</a></td><td>23</td></tr>
+      <tr><td>Section 21</td><td><a href="#ch21">Go to Person</a></td><td>23</td></tr>
+      <tr><td>Section 22</td><td><a href="#ch22">Glossary of Terms and Acronyms</a></td><td>24</td></tr>
+      <tr><td>Section 23</td><td><a href="#ch23">References and Appendices</a></td><td>25</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">03</div>
+</div><!-- /toc -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 1 — INTRODUCTION & APPLICATION PURPOSE
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch1">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 1</div>
+      <div class="ch-title">Introduction</div>
+    </div>
+    <div class="ch-subtitle">Purpose of the document and application purpose</div>
+  </div>
+
+  <h2>1.1 Purpose of the Document</h2>
+  <p>{{DOC_PURPOSE_DESCRIPTION}}</p>
+  <p>This document serves as a critical reference for architects, developers, and business stakeholders involved in the evolution of the {{REPO_NAME}} system.</p>
+
+  <h2>1.2 Application Purpose</h2>
+  <p>{{APP_PURPOSE_DESCRIPTION}}</p>
+
+  <div class="callout info">
+    <strong>Modernization Note</strong>
+    {{APP_MODERNIZATION_CONTEXT}}
+  </div>
+
+  <h2>Application at a Glance</h2>
+  <table class="brd-table">
+    <thead><tr><th>Attribute</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Application Name</td><td>{{APP_FULL_NAME}}</td></tr>
+      <tr><td>Repository</td><td>{{REPO_NAME}}</td></tr>
+      <tr><td>Primary Language</td><td>{{PRIMARY_LANG}}</td></tr>
+      <tr><td>Platform / OS</td><td>{{PLATFORM}}</td></tr>
+      <tr><td>Processing Modes</td><td>{{PROCESSING_MODES}}</td></tr>
+      <tr><td>Total Programs</td><td>{{TOTAL_PROGRAMS}}</td></tr>
+      <tr><td>Total LOC</td><td>{{TOTAL_LOC}}</td></tr>
+      <tr><td>Orphan Files</td><td>{{ORPHAN_FILES}}</td></tr>
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">04</div>
+</div><!-- /ch1 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 2 — PURPOSE, SCOPE & OBJECTIVES
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch2">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 2</div>
+      <div class="ch-title">Purpose and Scope</div>
+    </div>
+    <div class="ch-subtitle">Detailed purpose, modernization goals, and scope of capabilities</div>
+  </div>
+
+  <h2>2.1 Detailed Purpose</h2>
+  <p>{{DETAILED_PURPOSE}}</p>
+  <p>The primary value it provides is a standardized platform for:</p>
+
+  <div class="phase-list">
+    <div class="phase-item">
+      <div class="phase-num">Objective 01</div>
+      <div class="phase-title">{{OBJECTIVE_1_TITLE}}</div>
+      <div class="phase-desc">{{OBJECTIVE_1_DESC}}</div>
+    </div>
+    <div class="phase-item">
+      <div class="phase-num">Objective 02</div>
+      <div class="phase-title">{{OBJECTIVE_2_TITLE}}</div>
+      <div class="phase-desc">{{OBJECTIVE_2_DESC}}</div>
+    </div>
+    <div class="phase-item">
+      <div class="phase-num">Objective 03</div>
+      <div class="phase-title">{{OBJECTIVE_3_TITLE}}</div>
+      <div class="phase-desc">{{OBJECTIVE_3_DESC}}</div>
+    </div>
+    <div class="phase-item">
+      <div class="phase-num">Objective 04</div>
+      <div class="phase-title">{{OBJECTIVE_4_TITLE}}</div>
+      <div class="phase-desc">{{OBJECTIVE_4_DESC}}</div>
+    </div>
+  </div>
+
+  <h2>2.2 Scope</h2>
+  <div class="scope-grid">
+    <div class="scope-box in-scope">
+      <h4>✔ In Scope</h4>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_1}}</span></div>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_2}}</span></div>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_3}}</span></div>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_4}}</span></div>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_5}}</span></div>
+      <div class="scope-item"><span class="scope-mark">▸</span><span>{{IN_SCOPE_6}}</span></div>
+    </div>
+    <div class="scope-box out-scope">
+      <h4>✖ Out of Scope</h4>
+      <div class="scope-item"><span class="scope-mark">–</span><span>{{OUT_SCOPE_1}}</span></div>
+      <div class="scope-item"><span class="scope-mark">–</span><span>{{OUT_SCOPE_2}}</span></div>
+      <div class="scope-item"><span class="scope-mark">–</span><span>{{OUT_SCOPE_3}}</span></div>
+      <div class="scope-item"><span class="scope-mark">–</span><span>{{OUT_SCOPE_4}}</span></div>
+    </div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">05</div>
+</div><!-- /ch2 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 3 — BUSINESS FUNCTIONALITY / KEY FEATURES
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch3">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 3</div>
+      <div class="ch-title">Business Functionality<br>/ Key Features</div>
+    </div>
+    <div class="ch-subtitle">Capability-by-capability business overview, key features, and business value</div>
+  </div>
+
+  <!-- Repeat this block for each major capability -->
+  <h2>3.1 {{CAPABILITY_1_NAME}}</h2>
+  <p><strong>Business Overview:</strong> {{CAPABILITY_1_OVERVIEW}}</p>
+  <h4 class="sub">Key Business Features</h4>
+  <ul class="nfr-list">
+    <li>{{CAP1_FEATURE_1}}</li>
+    <li>{{CAP1_FEATURE_2}}</li>
+    <li>{{CAP1_FEATURE_3}}</li>
+    <li>{{CAP1_FEATURE_4}}</li>
+  </ul>
+  <p><strong>Business Value:</strong> {{CAPABILITY_1_VALUE}}</p>
+  <h4 class="sub">Primary Business Processes</h4>
+  <ul class="nfr-list">
+    <li>{{CAP1_PROCESS_1}}</li>
+    <li>{{CAP1_PROCESS_2}}</li>
+    <li>{{CAP1_PROCESS_3}}</li>
+  </ul>
+
+  <h2>3.2 {{CAPABILITY_2_NAME}}</h2>
+  <p><strong>Business Overview:</strong> {{CAPABILITY_2_OVERVIEW}}</p>
+  <h4 class="sub">Key Business Features</h4>
+  <ul class="nfr-list">
+    <li>{{CAP2_FEATURE_1}}</li>
+    <li>{{CAP2_FEATURE_2}}</li>
+    <li>{{CAP2_FEATURE_3}}</li>
+  </ul>
+  <p><strong>Business Value:</strong> {{CAPABILITY_2_VALUE}}</p>
+
+  <h2>3.3 {{CAPABILITY_3_NAME}}</h2>
+  <p><strong>Business Overview:</strong> {{CAPABILITY_3_OVERVIEW}}</p>
+  <h4 class="sub">Key Business Features</h4>
+  <ul class="nfr-list">
+    <li>{{CAP3_FEATURE_1}}</li>
+    <li>{{CAP3_FEATURE_2}}</li>
+    <li>{{CAP3_FEATURE_3}}</li>
+  </ul>
+  <p><strong>Business Value:</strong> {{CAPABILITY_3_VALUE}}</p>
+
+  <!-- Add more 3.N sections as required -->
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">06</div>
+</div><!-- /ch3 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 4 — HIGH-LEVEL ARCHITECTURE OVERVIEW
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch4">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 4</div>
+      <div class="ch-title">High-Level Architecture</div>
+    </div>
+    <div class="ch-subtitle">Architectural layers, design patterns, and component relationships</div>
+  </div>
+
+  <p>{{ARCHITECTURE_INTRO}}</p>
+
+  <!-- ── Architecture Layer Diagram ── -->
+  <div class="full-arch">
+    <div class="full-arch-title">System Architecture — {{REPO_NAME}}</div>
+
+    <div class="arch-section s-actor">
+      <div class="arch-section-label">👤 Actors / Users</div>
+      <div class="arch-row">
+        <div class="arch-card">{{ACTOR_1}}</div>
+        <div class="arch-card">{{ACTOR_2}}</div>
+        <div class="arch-card">{{ACTOR_3}}</div>
+      </div>
+    </div>
+    <div class="arch-connector">↕ ↕ ↕</div>
+
+    <div class="arch-section s-ui">
+      <div class="arch-section-label">🖥 Presentation Layer</div>
+      <div class="arch-row">
+        <div class="arch-card">{{UI_COMPONENT_1}}</div>
+        <div class="arch-card">{{UI_COMPONENT_2}}</div>
+        <div class="arch-card">{{UI_COMPONENT_3}}</div>
+      </div>
+    </div>
+    <div class="arch-connector">↕ ↕</div>
+
+    <div class="arch-section s-biz">
+      <div class="arch-section-label">⚙ Application / Business Logic Layer</div>
+      <div class="arch-row">
+        <div class="arch-card">{{BIZ_COMPONENT_1}}</div>
+        <div class="arch-card">{{BIZ_COMPONENT_2}}</div>
+        <div class="arch-card">{{BIZ_COMPONENT_3}}</div>
+        <div class="arch-card">{{BIZ_COMPONENT_4}}</div>
+        <div class="arch-card">{{BIZ_COMPONENT_5}}</div>
+      </div>
+    </div>
+    <div class="arch-connector">↕ ↕</div>
+
+    <div class="arch-section s-data-access">
+      <div class="arch-section-label">🔗 Data Access Layer</div>
+      <div class="arch-row">
+        <div class="arch-card">{{DATA_ACCESS_1}}</div>
+        <div class="arch-card">{{DATA_ACCESS_2}}</div>
+        <div class="arch-card">{{DATA_ACCESS_3}}</div>
+      </div>
+    </div>
+    <div class="arch-connector">↕ ↕</div>
+
+    <div class="arch-section s-data">
+      <div class="arch-section-label">🗄 Data Layer</div>
+      <div class="arch-row">
+        <div class="arch-card">{{DATA_STORE_1}}</div>
+        <div class="arch-card">{{DATA_STORE_2}}</div>
+        <div class="arch-card">{{DATA_STORE_3}}</div>
+        <div class="arch-card">{{DATA_STORE_4}}</div>
+      </div>
+    </div>
+    <div class="arch-connector">↕</div>
+
+    <div class="arch-section s-ext">
+      <div class="arch-section-label">🌐 External Integrations (Optional Modules)</div>
+      <div class="arch-row">
+        <div class="arch-card">{{EXT_SYSTEM_1}}</div>
+        <div class="arch-card">{{EXT_SYSTEM_2}}</div>
+        <div class="arch-card">{{EXT_SYSTEM_3}}</div>
+      </div>
+    </div>
+
+    <div class="arch-legend">
+      <div class="arch-legend-item"><div class="arch-legend-dot" style="background:#f0f0f0;border:1px solid #bbb"></div> Presentation</div>
+      <div class="arch-legend-item"><div class="arch-legend-dot" style="background:#f5f5f5;border:1px solid #ccc"></div> Business Logic</div>
+      <div class="arch-legend-item"><div class="arch-legend-dot" style="background:#1a1a1a"></div> Data Stores</div>
+      <div class="arch-legend-item"><div class="arch-legend-dot" style="background:#f0f0f0;border:1px dashed #aaa"></div> External / Optional</div>
+    </div>
+    <div class="arch-fig-caption">Figure 4.1 — {{REPO_NAME}} High-Level Architecture Diagram</div>
+  </div>
+
+  <h2>4.1 CBID</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:30%">Pattern</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>{{ARCH_PATTERN_1}}</td><td>{{ARCH_PATTERN_1_DESC}}</td></tr>
+      <tr><td>{{ARCH_PATTERN_2}}</td><td>{{ARCH_PATTERN_2_DESC}}</td></tr>
+      <tr><td>{{ARCH_PATTERN_3}}</td><td>{{ARCH_PATTERN_3_DESC}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4.2 Business Flow Overview</h2>
+  <p>{{BUSINESS_FLOW_OVERVIEW}}</p>
+
+  {{FULL_MODULE_BREAKDOWN}}
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">07</div>
+</div><!-- /ch4 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 5 — TECHNICAL STACK & TECHNOLOGIES
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch5">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 5</div>
+      <div class="ch-title">Technical Stack<br>&amp; Technologies</div>
+    </div>
+    <div class="ch-subtitle">Programming languages, online environment, databases, job control, middleware, security, and OS</div>
+  </div>
+
+  {{FULL_TECH_STACK_TABLE}}
+
+  <h2>5.1 Programming Languages</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:25%">Language</th><th style="width:15%">Programs</th><th style="width:15%">LOC</th><th>Usage / Notes</th></tr></thead>
+    <tbody>
+      <tr><td>{{LANG_1}}</td><td>{{LANG_1_PROGRAMS}}</td><td>{{LANG_1_LOC}}</td><td>{{LANG_1_NOTES}}</td></tr>
+      <tr><td>{{LANG_2}}</td><td>{{LANG_2_PROGRAMS}}</td><td>{{LANG_2_LOC}}</td><td>{{LANG_2_NOTES}}</td></tr>
+      <tr><td>{{LANG_3}}</td><td>{{LANG_3_PROGRAMS}}</td><td>{{LANG_3_LOC}}</td><td>{{LANG_3_NOTES}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.2 Online Environment</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:30%">Component</th><th>Description &amp; Role</th></tr></thead>
+    <tbody>
+      <tr><td>{{RUNTIME_1}}</td><td>{{RUNTIME_1_DESC}}</td></tr>
+      <tr><td>{{RUNTIME_2}}</td><td>{{RUNTIME_2_DESC}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.3 Databases / File Systems</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:25%">Technology</th><th style="width:20%">Type</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>{{DB_1}}</td><td>{{DB_1_TYPE}}</td><td>{{DB_1_USAGE}}</td></tr>
+      <tr><td>{{DB_2}}</td><td>{{DB_2_TYPE}}</td><td>{{DB_2_USAGE}}</td></tr>
+      <tr><td>{{DB_3}}</td><td>{{DB_3_TYPE}}</td><td>{{DB_3_USAGE}}</td></tr>
+      <tr><td>{{DB_4}}</td><td>{{DB_4_TYPE}}</td><td>{{DB_4_USAGE}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.4 Job Control</h2>
+  <p>{{JOB_CONTROL_DESC}}</p>
+
+  <h2>5.5 Job Scheduling</h2>
+  <p>{{JOB_SCHEDULING_DESC}}</p>
+
+  <h2>5.6 Middleware / Messaging</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:30%">Technology</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td>{{MIDDLEWARE_1}}</td><td>{{MIDDLEWARE_1_USE}}</td></tr>
+      <tr><td>{{MIDDLEWARE_2}}</td><td>{{MIDDLEWARE_2_USE}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.7 Security Framework</h2>
+  <p>{{SECURITY_FRAMEWORK_DESC}}</p>
+
+  <h2>5.8 Development &amp; Support Tools</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:30%">Tool</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>{{DEV_TOOL_1}}</td><td>{{DEV_TOOL_1_PURPOSE}}</td></tr>
+      <tr><td>{{DEV_TOOL_2}}</td><td>{{DEV_TOOL_2_PURPOSE}}</td></tr>
+      <tr><td>{{DEV_TOOL_3}}</td><td>{{DEV_TOOL_3_PURPOSE}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.9 Operating System</h2>
+  <p>{{OPERATING_SYSTEM_DESC}}</p>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">08</div>
+</div><!-- /ch5 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 6 — DATA MANAGEMENT & ENTITY OVERVIEW
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch6">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 6</div>
+      <div class="ch-title">Data Management Overview</div>
+    </div>
+    <div class="ch-subtitle">Data entities/stores, high-level data flow, and data dependencies</div>
+  </div>
+
+  <h2>6.1 Data Entities/Stores</h2>
+  <p>{{DATA_ENTITIES_INTRO}}</p>
+
+  <h4 class="sub">Primary Data Stores</h4>
+  {{DATA_STORES_TABLE}}
+
+  <h2>6.2 Data Flow (High-Level)</h2>
+  <h4 class="sub">Data Entry Points</h4>
+  <ul class="nfr-list">
+    <li>{{DATA_ENTRY_1}}</li>
+    <li>{{DATA_ENTRY_2}}</li>
+    <li>{{DATA_ENTRY_3}}</li>
+    <li>{{DATA_ENTRY_4}}</li>
+  </ul>
+
+  <h4 class="sub">Data Processing Workflows</h4>
+  <ul class="nfr-list">
+    <li>{{DATA_PROC_1}}</li>
+    <li>{{DATA_PROC_2}}</li>
+  </ul>
+
+  <h4 class="sub">Data Exit Points</h4>
+  <ul class="nfr-list">
+    <li>{{DATA_EXIT_1}}</li>
+    <li>{{DATA_EXIT_2}}</li>
+    <li>{{DATA_EXIT_3}}</li>
+  </ul>
+
+  <h2>6.3 Data Dependencies</h2>
+  <div class="callout">
+    <strong>Critical Dependencies</strong>
+    <ul class="nfr-list" style="margin-top:6px">
+      <li>{{DATA_DEP_1}}</li>
+      <li>{{DATA_DEP_2}}</li>
+      <li>{{DATA_DEP_3}}</li>
+    </ul>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">09</div>
+</div><!-- /ch6 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 7 — DATABASE SCHEMA & ER DIAGRAM
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch7">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 7</div>
+      <div class="ch-title">Database Schema<br>&amp; ER Diagram</div>
+    </div>
+    <div class="ch-subtitle">Entity-relationship model, table definitions, primary keys, and foreign keys</div>
+  </div>
+
+
+  <p>{{DB_SCHEMA_INTRO}}</p>
+
+  {{FULL_DB_SCHEMA}}
+
+  <!-- ── ER Card Grid ── -->
+  <div class="er-grid">
+    {{ER_GRID_HTML}}
+  </div><!-- /er-grid -->
+  <div class="er-fig-caption">Figure 7.1 — {{REPO_NAME}} Entity Relationship Diagram · <span class="badge-pk">PK</span> = Primary Key &nbsp; <span class="badge-fk">FK</span> = Foreign Key</div>
+
+  <h2>7.1 Key Relationships</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:30%">Parent Table</th><th style="width:30%">Child Table</th><th>Relationship</th></tr></thead>
+    <tbody>
+      <tr><td>{{REL_1_PARENT}}</td><td>{{REL_1_CHILD}}</td><td>{{REL_1_TYPE}}</td></tr>
+      <tr><td>{{REL_2_PARENT}}</td><td>{{REL_2_CHILD}}</td><td>{{REL_2_TYPE}}</td></tr>
+      <tr><td>{{REL_3_PARENT}}</td><td>{{REL_3_CHILD}}</td><td>{{REL_3_TYPE}}</td></tr>
+      <tr><td>{{REL_4_PARENT}}</td><td>{{REL_4_CHILD}}</td><td>{{REL_4_TYPE}}</td></tr>
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">10</div>
+</div><!-- /ch7 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 8 — PROCESS OVERVIEW (ONLINE & BATCH)
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch8">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 8</div>
+      <div class="ch-title">Process Overview<br>(Online &amp; Batch)</div>
+    </div>
+    <div class="ch-subtitle">Online processes, batch processes, major job streams, and scheduler role</div>
+  </div>
+
+  <h2>8.1 Online Processes</h2>
+  <p>{{ONLINE_PROCESS_INTRO}}</p>
+  <table class="brd-table">
+    <thead><tr><th style="width:20%">Transaction Code</th><th style="width:35%">Program / Module</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>{{TXN_CODE_1}}</code></td><td>{{TXN_PROG_1}}</td><td>{{TXN_DESC_1}}</td></tr>
+      <tr><td><code>{{TXN_CODE_2}}</code></td><td>{{TXN_PROG_2}}</td><td>{{TXN_DESC_2}}</td></tr>
+      <tr><td><code>{{TXN_CODE_3}}</code></td><td>{{TXN_PROG_3}}</td><td>{{TXN_DESC_3}}</td></tr>
+      <tr><td><code>{{TXN_CODE_4}}</code></td><td>{{TXN_PROG_4}}</td><td>{{TXN_DESC_4}}</td></tr>
+      <tr><td><code>{{TXN_CODE_5}}</code></td><td>{{TXN_PROG_5}}</td><td>{{TXN_DESC_5}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>8.2 Batch Processes</h2>
+  <p>{{BATCH_PROCESS_INTRO}}</p>
+  <h4 class="sub">Batch Cycles</h4>
+  <table class="brd-table">
+    <thead><tr><th style="width:25%">Cycle</th><th style="width:25%">Key Job(s)</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>{{BATCH_CYCLE_1}}</td><td><code>{{BATCH_JOB_1}}</code></td><td>{{BATCH_JOB_1_DESC}}</td></tr>
+      <tr><td>{{BATCH_CYCLE_2}}</td><td><code>{{BATCH_JOB_2}}</code></td><td>{{BATCH_JOB_2_DESC}}</td></tr>
+      <tr><td>{{BATCH_CYCLE_3}}</td><td><code>{{BATCH_JOB_3}}</code></td><td>{{BATCH_JOB_3_DESC}}</td></tr>
+      <tr><td>{{BATCH_CYCLE_4}}</td><td><code>{{BATCH_JOB_4}}</code></td><td>{{BATCH_JOB_4_DESC}}</td></tr>
+    </tbody>
+  </table>
+
+  <h4 class="sub">Job Stream Dependencies</h4>
+  <div class="callout info">
+    <strong>Scheduler Note</strong>
+    {{JOB_STREAM_DEPENDENCY_DESC}}
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">11</div>
+</div><!-- /ch8 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 9 — APPLICATION FLOW & USER JOURNEY
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch9">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 9</div>
+      <div class="ch-title">Application Flow<br>&amp; User Journey</div>
+    </div>
+    <div class="ch-subtitle">Screen-by-screen navigation flow showing how users interact with the application</div>
+  </div>
+
+  <h2>9.1 Key Transactions/Screen Flows</h2>
+  <div class="app-flow">
+    <div class="app-flow-title">{{FLOW_1_TITLE}}</div>
+    <div class="app-flow-track">
+      <div class="app-screen">
+        <div class="app-screen-icon">🔐</div>
+        <div class="app-screen-name">{{SCREEN_1_NAME}}</div>
+        <div class="app-screen-desc">{{SCREEN_1_DESC}}</div>
+      </div>
+      <div class="app-flow-arrow"></div>
+      <div class="app-screen">
+        <div class="app-screen-icon">📋</div>
+        <div class="app-screen-name">{{SCREEN_2_NAME}}</div>
+        <div class="app-screen-desc">{{SCREEN_2_DESC}}</div>
+      </div>
+      <div class="app-flow-arrow"></div>
+      <div class="app-screen">
+        <div class="app-screen-icon">🏠</div>
+        <div class="app-screen-name">{{SCREEN_3_NAME}}</div>
+        <div class="app-screen-desc">{{SCREEN_3_DESC}}</div>
+      </div>
+      <div class="app-flow-arrow"></div>
+      <div class="app-screen">
+        <div class="app-screen-icon">⚙️</div>
+        <div class="app-screen-name">{{SCREEN_4_NAME}}</div>
+        <div class="app-screen-desc">{{SCREEN_4_DESC}}</div>
+      </div>
+      <div class="app-flow-arrow"></div>
+      <div class="app-screen">
+        <div class="app-screen-icon s-db">🗄</div>
+        <div class="app-screen-name">{{SCREEN_5_NAME}}</div>
+        <div class="app-screen-desc">{{SCREEN_5_DESC}}</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>9.2 Key Screen Flows</h2>
+  <h4 class="sub">{{KEY_FLOW_1_TITLE}}</h4>
+  <p>{{KEY_FLOW_1_DESC}}</p>
+
+  <h4 class="sub">{{KEY_FLOW_2_TITLE}}</h4>
+  <p>{{KEY_FLOW_2_DESC}}</p>
+
+  <h4 class="sub">{{KEY_FLOW_3_TITLE}}</h4>
+  <p>{{KEY_FLOW_3_DESC}}</p>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">12</div>
+</div><!-- /ch9 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 10 — USE CASE SPECIFICATIONS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch10">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 10</div>
+      <div class="ch-title">Use Case<br>Specifications</div>
+    </div>
+    <div class="ch-subtitle">Actor interactions, preconditions, and use case specifications</div>
+  </div>
+
+  <!-- Repeat for each use case -->
+  <div class="use-case-card">
+    <div class="use-case-id">UC-001</div>
+    <div class="use-case-title">{{UC1_TITLE}}</div>
+    <div class="use-case-meta">
+      <div class="use-case-meta-item"><span>Actor:</span>{{UC1_ACTOR}}</div>
+      <div class="use-case-meta-item"><span>Priority:</span><span class="badge badge-high">{{UC1_PRIORITY}}</span></div>
+      <div class="use-case-meta-item"><span>Precondition:</span>{{UC1_PRECONDITION}}</div>
+      <div class="use-case-meta-item"><span>Postcondition:</span>{{UC1_POSTCONDITION}}</div>
+    </div>
+    <div class="use-case-steps">
+      <div class="use-case-step">{{UC1_STEP_1}}</div>
+      <div class="use-case-step">{{UC1_STEP_2}}</div>
+      <div class="use-case-step">{{UC1_STEP_3}}</div>
+      <div class="use-case-step">{{UC1_STEP_4}}</div>
+      <div class="use-case-step">{{UC1_STEP_5}}</div>
+    </div>
+  </div>
+
+  <div class="use-case-card">
+    <div class="use-case-id">UC-002</div>
+    <div class="use-case-title">{{UC2_TITLE}}</div>
+    <div class="use-case-meta">
+      <div class="use-case-meta-item"><span>Actor:</span>{{UC2_ACTOR}}</div>
+      <div class="use-case-meta-item"><span>Priority:</span><span class="badge badge-medium">{{UC2_PRIORITY}}</span></div>
+      <div class="use-case-meta-item"><span>Precondition:</span>{{UC2_PRECONDITION}}</div>
+      <div class="use-case-meta-item"><span>Postcondition:</span>{{UC2_POSTCONDITION}}</div>
+    </div>
+    <div class="use-case-steps">
+      <div class="use-case-step">{{UC2_STEP_1}}</div>
+      <div class="use-case-step">{{UC2_STEP_2}}</div>
+      <div class="use-case-step">{{UC2_STEP_3}}</div>
+      <div class="use-case-step">{{UC2_STEP_4}}</div>
+    </div>
+  </div>
+
+  <div class="use-case-card">
+    <div class="use-case-id">UC-003</div>
+    <div class="use-case-title">{{UC3_TITLE}}</div>
+    <div class="use-case-meta">
+      <div class="use-case-meta-item"><span>Actor:</span>{{UC3_ACTOR}}</div>
+      <div class="use-case-meta-item"><span>Priority:</span><span class="badge badge-critical">{{UC3_PRIORITY}}</span></div>
+      <div class="use-case-meta-item"><span>Precondition:</span>{{UC3_PRECONDITION}}</div>
+      <div class="use-case-meta-item"><span>Postcondition:</span>{{UC3_POSTCONDITION}}</div>
+    </div>
+    <div class="use-case-steps">
+      <div class="use-case-step">{{UC3_STEP_1}}</div>
+      <div class="use-case-step">{{UC3_STEP_2}}</div>
+      <div class="use-case-step">{{UC3_STEP_3}}</div>
+      <div class="use-case-step">{{UC3_STEP_4}}</div>
+      <div class="use-case-step">{{UC3_STEP_5}}</div>
+    </div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">13</div>
+</div><!-- /ch10 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 11 — OBJECT / CLASS MODEL
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch11">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 11</div>
+      <div class="ch-title">Object Model</div>
+    </div>
+    <div class="ch-subtitle">Object-oriented class inventory and relationships</div>
+  </div>
+
+  <p>{{CLASS_MODEL_INTRO}}</p>
+
+  {{FULL_CLASS_MODEL}}
+
+  <!-- STATIC_CLASS_GRID_START -->
+  <div class="class-grid">
+
+    <div class="class-card">
+      <div class="class-card-head"><span>Entity / Program</span>{{CLASS_1_NAME}}</div>
+      <div class="class-section-title">Attributes</div>
+      <div class="class-field"><span class="fname">{{CLASS_1_ATTR_1}}</span><span class="ftype">{{CLASS_1_ATTR_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_1_ATTR_2}}</span><span class="ftype">{{CLASS_1_ATTR_2_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_1_ATTR_3}}</span><span class="ftype">{{CLASS_1_ATTR_3_TYPE}}</span></div>
+      <div class="class-section-title">Methods / Operations</div>
+      <div class="class-field"><span class="fname">{{CLASS_1_METHOD_1}}</span><span class="ftype">{{CLASS_1_METHOD_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_1_METHOD_2}}</span><span class="ftype">{{CLASS_1_METHOD_2_TYPE}}</span></div>
+    </div>
+
+    <div class="class-card">
+      <div class="class-card-head"><span>Entity / Program</span>{{CLASS_2_NAME}}</div>
+      <div class="class-section-title">Attributes</div>
+      <div class="class-field"><span class="fname">{{CLASS_2_ATTR_1}}</span><span class="ftype">{{CLASS_2_ATTR_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_2_ATTR_2}}</span><span class="ftype">{{CLASS_2_ATTR_2_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_2_ATTR_3}}</span><span class="ftype">{{CLASS_2_ATTR_3_TYPE}}</span></div>
+      <div class="class-section-title">Methods / Operations</div>
+      <div class="class-field"><span class="fname">{{CLASS_2_METHOD_1}}</span><span class="ftype">{{CLASS_2_METHOD_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_2_METHOD_2}}</span><span class="ftype">{{CLASS_2_METHOD_2_TYPE}}</span></div>
+    </div>
+
+    <div class="class-card">
+      <div class="class-card-head"><span>Entity / Program</span>{{CLASS_3_NAME}}</div>
+      <div class="class-section-title">Attributes</div>
+      <div class="class-field"><span class="fname">{{CLASS_3_ATTR_1}}</span><span class="ftype">{{CLASS_3_ATTR_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_3_ATTR_2}}</span><span class="ftype">{{CLASS_3_ATTR_2_TYPE}}</span></div>
+      <div class="class-section-title">Methods / Operations</div>
+      <div class="class-field"><span class="fname">{{CLASS_3_METHOD_1}}</span><span class="ftype">{{CLASS_3_METHOD_1_TYPE}}</span></div>
+    </div>
+
+    <div class="class-card">
+      <div class="class-card-head"><span>Entity / Program</span>{{CLASS_4_NAME}}</div>
+      <div class="class-section-title">Attributes</div>
+      <div class="class-field"><span class="fname">{{CLASS_4_ATTR_1}}</span><span class="ftype">{{CLASS_4_ATTR_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_4_ATTR_2}}</span><span class="ftype">{{CLASS_4_ATTR_2_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_4_ATTR_3}}</span><span class="ftype">{{CLASS_4_ATTR_3_TYPE}}</span></div>
+      <div class="class-section-title">Methods / Operations</div>
+      <div class="class-field"><span class="fname">{{CLASS_4_METHOD_1}}</span><span class="ftype">{{CLASS_4_METHOD_1_TYPE}}</span></div>
+      <div class="class-field"><span class="fname">{{CLASS_4_METHOD_2}}</span><span class="ftype">{{CLASS_4_METHOD_2_TYPE}}</span></div>
+    </div>
+
+  </div>
+  <!-- STATIC_CLASS_GRID_END -->
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">14</div>
+</div><!-- /ch11 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 12 — ACTIVITY & PROCESS FLOW DIAGRAMS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch12">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 12</div>
+      <div class="ch-title">Activity &amp;<br>Process Flows</div>
+    </div>
+    <div class="ch-subtitle">Step-by-step workflow and activity flow analysis</div>
+  </div>
+
+  <h2>12.1 {{ACTIVITY_FLOW_1_TITLE}}</h2>
+  <div class="flowchart">
+    <div class="flowchart-title">{{ACTIVITY_FLOW_1_TITLE}}</div>
+    <div class="fc-node fc-start">START</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">1</span>{{ACTIVITY_STEP_1}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">2</span>{{ACTIVITY_STEP_2}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">3</span>{{ACTIVITY_STEP_3}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">4</span>{{ACTIVITY_STEP_4}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">5</span>{{ACTIVITY_STEP_5}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">6</span>{{ACTIVITY_STEP_6}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">7</span>{{ACTIVITY_STEP_7}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">8</span>{{ACTIVITY_STEP_8}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">9</span>{{ACTIVITY_STEP_9}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">10</span>{{ACTIVITY_STEP_10}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-end">END</div>
+  </div>
+
+  <h2>12.2 {{ACTIVITY_FLOW_2_TITLE}}</h2>
+  <div class="flowchart">
+    <div class="flowchart-title">{{ACTIVITY_FLOW_2_TITLE}}</div>
+    <div class="fc-node fc-start">START</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">1</span>{{ACTIVITY_2_STEP_1}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">2</span>{{ACTIVITY_2_STEP_2}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">3</span>{{ACTIVITY_2_STEP_3}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">4</span>{{ACTIVITY_2_STEP_4}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">5</span>{{ACTIVITY_2_STEP_5}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-step"><span class="fc-step-num">6</span>{{ACTIVITY_2_STEP_6}}</div>
+    <div class="fc-arrow"></div>
+    <div class="fc-node fc-end">END</div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">15</div>
+</div><!-- /ch12 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 13 — SEQUENCE DIAGRAMS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch13">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 13</div>
+      <div class="ch-title">Sequence Diagrams</div>
+    </div>
+    <div class="ch-subtitle">Message-level interactions between system components</div>
+  </div>
+
+  <h2>13.1 {{SEQ_1_TITLE}}</h2>
+  <div class="seq-diagram">
+    <div class="seq-actors">
+      <div class="seq-actor">{{SEQ_ACTOR_1}}</div>
+      <div class="seq-actor">{{SEQ_ACTOR_2}}</div>
+      <div class="seq-actor">{{SEQ_ACTOR_3}}</div>
+      <div class="seq-actor">{{SEQ_ACTOR_4}}</div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"><span class="seq-msg">{{SEQ_MSG_1}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg">{{SEQ_MSG_2}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg">{{SEQ_MSG_3}}</span></div>
+      <div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div><div class="seq-cell"></div><div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg">{{SEQ_MSG_4}}</span></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg ret">{{SEQ_MSG_5}}</span></div>
+      <div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg ret">{{SEQ_MSG_6}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"><span class="seq-msg ret">{{SEQ_MSG_7}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+  </div>
+
+  <h2>13.2 {{SEQ_2_TITLE}}</h2>
+  <div class="seq-diagram">
+    <div class="seq-actors">
+      <div class="seq-actor">{{SEQ2_ACTOR_1}}</div>
+      <div class="seq-actor">{{SEQ2_ACTOR_2}}</div>
+      <div class="seq-actor">{{SEQ2_ACTOR_3}}</div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"><span class="seq-msg">{{SEQ2_MSG_1}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg">{{SEQ2_MSG_2}}</span></div>
+      <div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg ext">{{SEQ2_MSG_3}}</span></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"></div>
+      <div class="seq-cell"><span class="seq-msg ret">{{SEQ2_MSG_4}}</span></div>
+      <div class="seq-cell"></div>
+    </div>
+    <div class="seq-row">
+      <div class="seq-cell"><span class="seq-msg ret">{{SEQ2_MSG_5}}</span></div>
+      <div class="seq-cell"></div><div class="seq-cell"></div>
+    </div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">16</div>
+</div><!-- /ch13 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 14 — INTEGRATION POINTS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch14">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 14</div>
+      <div class="ch-title">Integration Points</div>
+    </div>
+    <div class="ch-subtitle">Inbound integrations, outbound integrations, and integration technologies</div>
+  </div>
+
+  <h2>14.1 Inbound Integrations</h2>
+
+  <div class="integration-card">
+    <div class="integration-tag">Inbound · {{INBOUND_1_TECH}}</div>
+    <div class="integration-title">{{INBOUND_1_NAME}}</div>
+    <div class="integration-meta">
+      <div class="integration-meta-row"><span>Technology:</span>{{INBOUND_1_TECH}}</div>
+      <div class="integration-meta-row"><span>Format:</span>{{INBOUND_1_FORMAT}}</div>
+      <div class="integration-meta-row"><span>Frequency:</span>{{INBOUND_1_FREQUENCY}}</div>
+      <div class="integration-meta-row"><span>Error Handling:</span>{{INBOUND_1_ERROR}}</div>
+    </div>
+    <div class="integration-desc">{{INBOUND_1_DESC}}</div>
+  </div>
+
+  <h2>14.2 Outbound Integrations</h2>
+
+  <div class="integration-card outbound">
+    <div class="integration-tag">Outbound · {{OUTBOUND_1_TECH}}</div>
+    <div class="integration-title">{{OUTBOUND_1_NAME}}</div>
+    <div class="integration-meta">
+      <div class="integration-meta-row"><span>Technology:</span>{{OUTBOUND_1_TECH}}</div>
+      <div class="integration-meta-row"><span>Format:</span>{{OUTBOUND_1_FORMAT}}</div>
+      <div class="integration-meta-row"><span>Frequency:</span>{{OUTBOUND_1_FREQUENCY}}</div>
+      <div class="integration-meta-row"><span>Consumers:</span>{{OUTBOUND_1_CONSUMERS}}</div>
+    </div>
+    <div class="integration-desc">{{OUTBOUND_1_DESC}}</div>
+  </div>
+
+  <h2>14.3 Integration Technologies</h2>
+  <table class="brd-table">
+    <thead><tr><th>Technology</th><th>Direction</th><th>Pattern</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>{{INT_TECH_1}}</td><td>{{INT_TECH_1_DIR}}</td><td>{{INT_TECH_1_PATTERN}}</td><td>{{INT_TECH_1_NOTES}}</td></tr>
+      <tr><td>{{INT_TECH_2}}</td><td>{{INT_TECH_2_DIR}}</td><td>{{INT_TECH_2_PATTERN}}</td><td>{{INT_TECH_2_NOTES}}</td></tr>
+      <tr><td>{{INT_TECH_3}}</td><td>{{INT_TECH_3_DIR}}</td><td>{{INT_TECH_3_PATTERN}}</td><td>{{INT_TECH_3_NOTES}}</td></tr>
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">17</div>
+</div><!-- /ch14 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 15 — API DESIGN & SPECIFICATION
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch15">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 15</div>
+      <div class="ch-title">API Design &amp;<br>Specification</div>
+    </div>
+    <div class="ch-subtitle">RESTful API specification with endpoints, payloads, and authentication</div>
+  </div>
+
+  <div class="callout info">
+    <strong>API Note</strong>
+    {{API_GENERAL_NOTE}}
+  </div>
+
+  {{FULL_API_ENDPOINTS}}
+
+  <!-- Group 1 -->
+  <div class="api-group">
+    <div class="api-group-title">{{API_GROUP_1_NAME}}</div>
+    <div class="api-endpoint">
+      <span class="method-badge method-get">GET</span>
+      <span class="api-path">{{API_1_PATH}}</span>
+      <div class="api-desc">{{API_1_DESC}}</div>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge method-post">POST</span>
+      <span class="api-path">{{API_2_PATH}}</span>
+      <div class="api-desc">{{API_2_DESC}}</div>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge method-put">PUT</span>
+      <span class="api-path">{{API_3_PATH}}</span>
+      <div class="api-desc">{{API_3_DESC}}</div>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge method-delete">DELETE</span>
+      <span class="api-path">{{API_4_PATH}}</span>
+      <div class="api-desc">{{API_4_DESC}}</div>
+    </div>
+  </div>
+
+  <!-- Group 2 -->
+  <div class="api-group">
+    <div class="api-group-title">{{API_GROUP_2_NAME}}</div>
+    <div class="api-endpoint">
+      <span class="method-badge method-get">GET</span>
+      <span class="api-path">{{API_5_PATH}}</span>
+      <div class="api-desc">{{API_5_DESC}}</div>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge method-post">POST</span>
+      <span class="api-path">{{API_6_PATH}}</span>
+      <div class="api-desc">{{API_6_DESC}}</div>
+    </div>
+  </div>
+
+  <!-- Group 3 -->
+  <div class="api-group">
+    <div class="api-group-title">{{API_GROUP_3_NAME}}</div>
+    <div class="api-endpoint">
+      <span class="method-badge method-post">POST</span>
+      <span class="api-path">{{API_7_PATH}}</span>
+      <div class="api-desc">{{API_7_DESC}}</div>
+    </div>
+    <div class="api-endpoint">
+      <span class="method-badge method-get">GET</span>
+      <span class="api-path">{{API_8_PATH}}</span>
+      <div class="api-desc">{{API_8_DESC}}</div>
+    </div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">18</div>
+</div><!-- /ch15 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 16 — NON-FUNCTIONAL REQUIREMENTS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch16">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 16</div>
+      <div class="ch-title">Non Functional<br>Requirements</div>
+    </div>
+    <div class="ch-subtitle">Security overview, availability, and performance requirements</div>
+  </div>
+
+  <h2>16.1 Security Overview</h2>
+  <h4 class="sub">16.1.1 Authentication</h4>
+  <ul class="nfr-list">
+    <li>{{NFR_AUTH_1}}</li>
+    <li>{{NFR_AUTH_2}}</li>
+    <li>{{NFR_AUTH_3}}</li>
+    <li>{{NFR_AUTH_4}}</li>
+  </ul>
+  <h4 class="sub">16.1.2 Authorization</h4>
+  <ul class="nfr-list">
+    <li>{{NFR_AUTHZ_1}}</li>
+    <li>{{NFR_AUTHZ_2}}</li>
+    <li>{{NFR_AUTHZ_3}}</li>
+  </ul>
+  <h4 class="sub">16.1.3 Data Security</h4>
+  <ul class="nfr-list">
+    <li>{{NFR_DATA_SEC_1}}</li>
+    <li>{{NFR_DATA_SEC_2}}</li>
+    <li>{{NFR_DATA_SEC_3}}</li>
+  </ul>
+
+  <h2>16.2 Availability</h2>
+  <ul class="nfr-list">
+    <li>{{NFR_AVAIL_1}}</li>
+    <li>{{NFR_AVAIL_2}}</li>
+    <li>{{NFR_AVAIL_3}}</li>
+  </ul>
+
+  <h2>16.3 Performance</h2>
+  <table class="brd-table">
+    <thead><tr><th>Metric</th><th>Target / Baseline</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Online Response Time</td><td>{{NFR_PERF_RESPONSE}}</td><td>{{NFR_PERF_RESPONSE_NOTE}}</td></tr>
+      <tr><td>Batch Window</td><td>{{NFR_PERF_BATCH}}</td><td>{{NFR_PERF_BATCH_NOTE}}</td></tr>
+      <tr><td>Throughput</td><td>{{NFR_PERF_THROUGHPUT}}</td><td>{{NFR_PERF_THROUGHPUT_NOTE}}</td></tr>
+      <tr><td>Concurrent Users</td><td>{{NFR_PERF_USERS}}</td><td>{{NFR_PERF_USERS_NOTE}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>16.4 Scalability &amp; Resilience</h2>
+  <ul class="nfr-list">
+    <li>{{NFR_SCALE_1}}</li>
+    <li>{{NFR_SCALE_2}}</li>
+    <li>{{NFR_SCALE_3}}</li>
+  </ul>
+
+  <h2>16.5 Compliance</h2>
+  <ul class="nfr-list">
+    <li>{{NFR_COMPLIANCE_1}}</li>
+    <li>{{NFR_COMPLIANCE_2}}</li>
+    <li>{{NFR_COMPLIANCE_3}}</li>
+  </ul>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">19</div>
+</div><!-- /ch16 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 17 — CURRENT RISKS & CHALLENGES
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch17">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 17</div>
+      <div class="ch-title">Current Risks/<br>Challenges</div>
+    </div>
+    <div class="ch-subtitle">Technical risks, operational challenges, security concerns, and maintenance issues</div>
+  </div>
+
+  <h2>17.1 Technical Risks</h2>
+  <div class="risk-item">
+    <div class="risk-severity hi">● High Risk</div>
+    <div class="risk-title">{{RISK_TECH_1_TITLE}}</div>
+    <div class="risk-desc">{{RISK_TECH_1_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_TECH_1_MITIGATION}}</div>
+  </div>
+  <div class="risk-item med">
+    <div class="risk-severity med">● Medium Risk</div>
+    <div class="risk-title">{{RISK_TECH_2_TITLE}}</div>
+    <div class="risk-desc">{{RISK_TECH_2_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_TECH_2_MITIGATION}}</div>
+  </div>
+  <div class="risk-item low">
+    <div class="risk-severity low">● Low Risk</div>
+    <div class="risk-title">{{RISK_TECH_3_TITLE}}</div>
+    <div class="risk-desc">{{RISK_TECH_3_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_TECH_3_MITIGATION}}</div>
+  </div>
+
+  <h2>17.2 Operational Challenges</h2>
+  <div class="risk-item med">
+    <div class="risk-severity med">● Medium Risk</div>
+    <div class="risk-title">{{RISK_OPS_1_TITLE}}</div>
+    <div class="risk-desc">{{RISK_OPS_1_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_OPS_1_MITIGATION}}</div>
+  </div>
+
+  <h2>17.3 Security Concerns</h2>
+  <div class="risk-item">
+    <div class="risk-severity hi">● High Risk</div>
+    <div class="risk-title">{{RISK_SEC_1_TITLE}}</div>
+    <div class="risk-desc">{{RISK_SEC_1_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_SEC_1_MITIGATION}}</div>
+  </div>
+  <div class="risk-item">
+    <div class="risk-severity hi">● High Risk</div>
+    <div class="risk-title">{{RISK_SEC_2_TITLE}}</div>
+    <div class="risk-desc">{{RISK_SEC_2_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_SEC_2_MITIGATION}}</div>
+  </div>
+
+  <h2>17.4 Maintenance and Support Issues</h2>
+  <div class="risk-item med">
+    <div class="risk-severity med">● Medium Risk</div>
+    <div class="risk-title">{{RISK_MAINT_1_TITLE}}</div>
+    <div class="risk-desc">{{RISK_MAINT_1_DESC}}</div>
+    <div class="risk-mitigation"><strong>Mitigation:</strong> {{RISK_MAINT_1_MITIGATION}}</div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">20</div>
+</div><!-- /ch17 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 18 — REPOSITORY FILE-BY-FILE GUIDE
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch18">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 18</div>
+      <div class="ch-title">Repository<br>File-by-File Guide</div>
+    </div>
+    <div class="ch-subtitle">Complete inventory and explanation of every file in the repository</div>
+  </div>
+
+  {{FULL_FILE_GUIDE}}
+
+  <!-- Repeat file-group blocks per directory / file type -->
+  <div class="file-group">
+    <div class="file-group-title">{{FILE_GROUP_1_NAME}}</div>
+    <div class="file-row"><span class="fname">{{FILE_1_NAME}}</span><span class="fdesc">{{FILE_1_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_2_NAME}}</span><span class="fdesc">{{FILE_2_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_3_NAME}}</span><span class="fdesc">{{FILE_3_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_4_NAME}}</span><span class="fdesc">{{FILE_4_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_5_NAME}}</span><span class="fdesc">{{FILE_5_DESC}}</span></div>
+  </div>
+
+  <div class="file-group">
+    <div class="file-group-title">{{FILE_GROUP_2_NAME}}</div>
+    <div class="file-row"><span class="fname">{{FILE_6_NAME}}</span><span class="fdesc">{{FILE_6_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_7_NAME}}</span><span class="fdesc">{{FILE_7_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_8_NAME}}</span><span class="fdesc">{{FILE_8_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_9_NAME}}</span><span class="fdesc">{{FILE_9_DESC}}</span></div>
+  </div>
+
+  <div class="file-group">
+    <div class="file-group-title">{{FILE_GROUP_3_NAME}}</div>
+    <div class="file-row"><span class="fname">{{FILE_10_NAME}}</span><span class="fdesc">{{FILE_10_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_11_NAME}}</span><span class="fdesc">{{FILE_11_DESC}}</span></div>
+    <div class="file-row"><span class="fname">{{FILE_12_NAME}}</span><span class="fdesc">{{FILE_12_DESC}}</span></div>
+  </div>
+
+  <h2>Orphan Files</h2>
+  <table class="brd-table">
+    <thead><tr><th>Category</th><th>Files</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>{{ORPHAN_CAT_1}}</td><td><code>{{ORPHAN_FILES_LIST_1}}</code></td><td>{{ORPHAN_CAT_1_NOTE}}</td></tr>
+      <tr><td>{{ORPHAN_CAT_2}}</td><td><code>{{ORPHAN_FILES_LIST_2}}</code></td><td>{{ORPHAN_CAT_2_NOTE}}</td></tr>
+      
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">21</div>
+</div><!-- /ch18 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 19 — SECURITY, ACCEPTANCE & COMPLIANCE
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch19">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 19</div>
+      <div class="ch-title">Security, Acceptance<br>&amp; Limitations</div>
+    </div>
+    <div class="ch-subtitle">Known limitations, security checklist, acceptance criteria, and success metrics</div>
+  </div>
+
+  <h2>19.1 Security Checklist</h2>
+  <ul class="check-list">
+    <li><span class="check-mark">✔</span>{{SEC_CHECK_1}}</li>
+    <li><span class="check-mark">✔</span>{{SEC_CHECK_2}}</li>
+    <li><span class="check-mark">✔</span>{{SEC_CHECK_3}}</li>
+    <li><span class="check-mark">✗</span>{{SEC_CHECK_4}} <span class="badge badge-high" style="margin-left:6px">Gap</span></li>
+    <li><span class="check-mark">✗</span>{{SEC_CHECK_5}} <span class="badge badge-high" style="margin-left:6px">Gap</span></li>
+    <li><span class="check-mark">✗</span>{{SEC_CHECK_6}} <span class="badge badge-medium" style="margin-left:6px">Partial</span></li>
+    <li><span class="check-mark">✔</span>{{SEC_CHECK_7}}</li>
+    <li><span class="check-mark">✔</span>{{SEC_CHECK_8}}</li>
+  </ul>
+
+  <h2>19.2 PII Analysis Summary</h2>
+  <table class="brd-table">
+    <thead><tr><th>PII Category</th><th>Data Elements</th><th>Risk Level</th><th>Capabilities Affected</th></tr></thead>
+    <tbody>
+      <tr><td>Personal Identifiers</td><td>{{PII_CAT_1_ELEMENTS}}</td><td><span class="badge badge-high">High</span></td><td>{{PII_CAT_1_CAPS}}</td></tr>
+      <tr><td>Contact Information</td><td>{{PII_CAT_2_ELEMENTS}}</td><td><span class="badge badge-medium">Medium</span></td><td>{{PII_CAT_2_CAPS}}</td></tr>
+      <tr><td>Financial Data</td><td>{{PII_CAT_3_ELEMENTS}}</td><td><span class="badge badge-critical">Critical</span></td><td>{{PII_CAT_3_CAPS}}</td></tr>
+      <tr><td>Authentication Data</td><td>{{PII_CAT_4_ELEMENTS}}</td><td><span class="badge badge-high">High</span></td><td>{{PII_CAT_4_CAPS}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>19.3 Acceptance Criteria</h2>
+  <ul class="nfr-list">
+    <li>{{ACCEPT_1}}</li>
+    <li>{{ACCEPT_2}}</li>
+    <li>{{ACCEPT_3}}</li>
+    <li>{{ACCEPT_4}}</li>
+    <li>{{ACCEPT_5}}</li>
+  </ul>
+
+  <h2>19.4 Known Limitations</h2>
+  <div class="callout warn">
+    <strong>Known Limitations</strong>
+    <ul class="nfr-list" style="margin-top:6px">
+      <li>{{LIMITATION_1}}</li>
+      <li>{{LIMITATION_2}}</li>
+      <li>{{LIMITATION_3}}</li>
+    </ul>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">22</div>
+</div><!-- /ch19 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 20 — SUPPORT & GO-TO PERSONS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch20">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 20</div>
+      <div class="ch-title">Support</div>
+    </div>
+    <div class="ch-subtitle">Support contacts and escalation channels</div>
+  </div>
+
+  <p>For support contacts, please refer to the "Go to Person" section.</p>
+
+  <h2>Support Channels</h2>
+  <table class="brd-table">
+    <thead><tr><th>Channel</th><th>Details</th><th>Hours</th></tr></thead>
+    <tbody>
+      <tr><td>{{SUPPORT_CHANNEL_1}}</td><td>{{SUPPORT_CHANNEL_1_DETAILS}}</td><td>{{SUPPORT_CHANNEL_1_HOURS}}</td></tr>
+      <tr><td>{{SUPPORT_CHANNEL_2}}</td><td>{{SUPPORT_CHANNEL_2_DETAILS}}</td><td>{{SUPPORT_CHANNEL_2_HOURS}}</td></tr>
+      <tr><td>{{SUPPORT_CHANNEL_3}}</td><td>{{SUPPORT_CHANNEL_3_DETAILS}}</td><td>{{SUPPORT_CHANNEL_3_HOURS}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Escalation Matrix</h2>
+  <table class="brd-table">
+    <thead><tr><th>Level</th><th>Trigger</th><th>Contact</th><th>SLA</th></tr></thead>
+    <tbody>
+      <tr><td>L1</td><td>{{ESC_L1_TRIGGER}}</td><td>{{ESC_L1_CONTACT}}</td><td>{{ESC_L1_SLA}}</td></tr>
+      <tr><td>L2</td><td>{{ESC_L2_TRIGGER}}</td><td>{{ESC_L2_CONTACT}}</td><td>{{ESC_L2_SLA}}</td></tr>
+      <tr><td>L3</td><td>{{ESC_L3_TRIGGER}}</td><td>{{ESC_L3_CONTACT}}</td><td>{{ESC_L3_SLA}}</td></tr>
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">23</div>
+</div><!-- /ch20 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 21 — GO TO PERSON
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch21">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 21</div>
+      <div class="ch-title">Go to Person</div>
+    </div>
+    <div class="ch-subtitle">Subject matter experts and project contacts</div>
+  </div>
+
+  <table class="brd-table">
+    <thead><tr><th style="width:25%">Role</th><th style="width:35%">Name / Alias</th><th>Contact</th></tr></thead>
+    <tbody>
+      <tr><td>Subject Matter Expert (SME)</td><td>{{SME_NAME}}</td><td>{{SME_EMAIL}}</td></tr>
+      <tr><td>Project Manager</td><td>{{PM_NAME}}</td><td>{{PM_EMAIL}}</td></tr>
+      <tr><td>Lead Architect</td><td>{{ARCH_NAME}}</td><td>{{ARCH_EMAIL}}</td></tr>
+      <tr><td>Operations Lead</td><td>{{OPS_NAME}}</td><td>{{OPS_EMAIL}}</td></tr>
+    </tbody>
+  </table>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">24</div>
+</div><!-- /ch21 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 22 — GLOSSARY OF TERMS & ACRONYMS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch22">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 22</div>
+      <div class="ch-title">Glossary of Terms<br>and Acronyms</div>
+    </div>
+    <div class="ch-subtitle">Definitions of all technical terms, abbreviations, and acronyms used in this document</div>
+  </div>
+
+  <!-- Add / remove glossary-item entries as required -->
+  <div class="glossary-grid">
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_1}}</div><div class="glossary-def">{{GLOSS_DEF_1}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_2}}</div><div class="glossary-def">{{GLOSS_DEF_2}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_3}}</div><div class="glossary-def">{{GLOSS_DEF_3}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_4}}</div><div class="glossary-def">{{GLOSS_DEF_4}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_5}}</div><div class="glossary-def">{{GLOSS_DEF_5}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_6}}</div><div class="glossary-def">{{GLOSS_DEF_6}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_7}}</div><div class="glossary-def">{{GLOSS_DEF_7}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_8}}</div><div class="glossary-def">{{GLOSS_DEF_8}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_9}}</div><div class="glossary-def">{{GLOSS_DEF_9}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_10}}</div><div class="glossary-def">{{GLOSS_DEF_10}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_11}}</div><div class="glossary-def">{{GLOSS_DEF_11}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_12}}</div><div class="glossary-def">{{GLOSS_DEF_12}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_13}}</div><div class="glossary-def">{{GLOSS_DEF_13}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_14}}</div><div class="glossary-def">{{GLOSS_DEF_14}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_15}}</div><div class="glossary-def">{{GLOSS_DEF_15}}</div></div>
+    <div class="glossary-item"><div class="glossary-term">{{GLOSS_TERM_16}}</div><div class="glossary-def">{{GLOSS_DEF_16}}</div></div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">25</div>
+</div><!-- /ch22 -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CHAPTER 23 — REFERENCES & APPENDICES
+═══════════════════════════════════════════════════════════════ -->
+<div class="page" id="ch23">
+<div class="page-inner">
+  <div class="ch-header">
+    <div class="ch-header-left">
+      <div class="ch-num">Chapter 23</div>
+      <div class="ch-title">References and<br>Appendices</div>
+    </div>
+    <div class="ch-subtitle">Source files, orphan file analysis, processing summary, and revision history</div>
+  </div>
+
+  <h2>23.1 Complete File Listing Used For Comprehension</h2>
+  <ul class="nfr-list">
+    <li>{{SOURCE_FILE_1}}</li>
+    <li>{{SOURCE_FILE_2}}</li>
+    <li>{{SOURCE_FILE_3}}</li>
+  </ul>
+
+  <h2>23.2 Orphan Files by Category</h2>
+  <table class="brd-table">
+    <thead><tr><th>Category</th><th>Orphan Files</th></tr></thead>
+    <tbody>
+      <tr><td>{{ORPHAN_TYPE_1}}</td><td>{{ORPHAN_TYPE_1_FILES}}</td></tr>
+      <tr><td>{{ORPHAN_TYPE_2}}</td><td>{{ORPHAN_TYPE_2_FILES}}</td></tr>
+      <tr><td>{{ORPHAN_TYPE_3}}</td><td>{{ORPHAN_TYPE_3_FILES}}</td></tr>
+      <tr><td>{{ORPHAN_TYPE_4}}</td><td>{{ORPHAN_TYPE_4_FILES}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>23.3 Processing Summary</h2>
+  <p>Based on the provided input documentation and data, this application overview document analyzes:</p>
+  <ul class="nfr-list">
+    <li>{{PROC_SUMMARY_1}}</li>
+    <li>{{PROC_SUMMARY_2}}</li>
+    <li>{{PROC_SUMMARY_3}}</li>
+    <li>{{PROC_SUMMARY_4}}</li>
+    <li>{{PROC_SUMMARY_5}}</li>
+  </ul>
+
+  <h2>23.4 Revision History</h2>
+  <table class="brd-table">
+    <thead><tr><th style="width:80px">Version</th><th style="width:120px">Date</th><th style="width:140px">Author</th><th>Changes</th></tr></thead>
+    <tbody>
+      <tr><td>v{{DOC_VERSION}}</td><td>{{DOC_DATE}}</td><td>{{DOC_AUTHOR}}</td><td>{{REV_CHANGES_LATEST}}</td></tr>
+    </tbody>
+  </table>
+
+
+  <!-- END OF DOCUMENT -->
+  <div style="margin-top:48px;border-top:3px solid var(--ink);padding-top:22px;text-align:center">
+    <div style="font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:8px;color:var(--ink)">End of Document</div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.08em">
+      {{REPO_NAME}} — Application Overview Document for Modernization — v{{DOC_VERSION}}
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:4px;letter-spacing:.05em">
+      Generated: {{DOC_DATE}} · {{DOC_AUTHOR}} · {{ORG_NAME}} · CONFIDENTIAL
+    </div>
+  </div>
+
+</div>
+<div class="pg-watermark">{{REPO_NAME}} Technical Document v{{DOC_VERSION}} — Confidential</div>
+<div class="pg-num">26</div>
+</div><!-- /ch23 -->
+
+</div><!-- /doc-wrapper -->
+</body>
+</html>

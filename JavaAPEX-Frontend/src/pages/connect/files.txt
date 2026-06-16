@@ -1,0 +1,20 @@
+Connect Page – Step 1 (Repository Connection)
+================================================
+
+Files in this folder:
+
+1. index.tsx        – ConnectPage component (layout wrapper for Step 1)
+2. ConnectPage.css  – Page-specific styles for the connect step
+3. files.txt        – This manifest file
+
+Purpose:
+  The Connect page is the entry point of the migration wizard.
+  Users provide a GitHub repository URL or upload a local Java project.
+  PAT token handling for private/enterprise repos is supported.
+
+Step Flow:
+  → User enters repo URL or selects local project
+  → Auto-detection of repo visibility (public / private / enterprise)
+  → If private: PAT token input appears
+  → "Analyze Repository" button triggers analysis
+  → On success: advances to Discovery (Step 2)

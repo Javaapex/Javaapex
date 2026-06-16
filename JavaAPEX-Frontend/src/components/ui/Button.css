@@ -1,0 +1,138 @@
+/* ── UI Button ─────────────────────────────────────────── */
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  outline: none;
+}
+
+.ui-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Sizes ──────────────────────────────────────────────── */
+
+.ui-button--sm {
+  padding: 8px 14px;
+  font-size: 12px;
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+.ui-button--md {
+  padding: 12px 20px;
+  font-size: 14px;
+  min-height: 46px;
+}
+
+.ui-button--lg {
+  padding: 14px 28px;
+  font-size: 15px;
+  min-height: 52px;
+}
+
+/* ── Variants ───────────────────────────────────────────── */
+
+.ui-button--primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border-color: #1d4ed8;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+}
+
+.ui-button--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.24);
+  transform: translateY(-1px);
+}
+
+.ui-button--secondary {
+  background: #fff;
+  color: #1e293b;
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.ui-button--secondary:hover:not(:disabled) {
+  border-color: #94a3b8;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+.ui-button--ghost {
+  background: transparent;
+  color: #2563eb;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.ui-button--ghost:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.ui-button--danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #fff;
+  border-color: #dc2626;
+  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.18);
+}
+
+.ui-button--danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+/* ── Full width ─────────────────────────────────────────── */
+
+.ui-button--full {
+  width: 100%;
+}
+
+/* ── Loading spinner ────────────────────────────────────── */
+
+.ui-button--loading {
+  pointer-events: none;
+}
+
+.ui-button__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-button-spin 0.7s linear infinite;
+}
+
+.ui-button--secondary .ui-button__spinner {
+  border-color: rgba(30, 41, 59, 0.2);
+  border-top-color: #1e293b;
+}
+
+@keyframes ui-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Icon ───────────────────────────────────────────────── */
+
+.ui-button__icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1em;
+}
+
+.ui-button__label {
+  display: inline-flex;
+  align-items: center;
+}

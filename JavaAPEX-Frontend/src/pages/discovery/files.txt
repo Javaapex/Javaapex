@@ -1,0 +1,21 @@
+Discovery Page – Step 2 (Repository Discovery & Dependencies)
+===============================================================
+
+Files in this folder:
+
+1. index.tsx          – DiscoveryPage component (layout wrapper for Step 2)
+2. DiscoveryPage.css  – Page-specific styles for the discovery step
+3. files.txt          – This manifest file
+
+Purpose:
+  The Discovery page displays the results of repository analysis.
+  Users can explore the file structure, review detected frameworks,
+  examine dependencies, and view project metadata.
+
+Step Flow:
+  → Repository analysis results displayed (structure, build tool, Java version)
+  → Detected frameworks shown (Spring, JUnit, Hibernate, etc.)
+  → Dependency list with categorization
+  → File explorer for browsing repo content
+  → Microservice eligibility assessment (if applicable)
+  → "Continue to Strategy" advances to Step 3

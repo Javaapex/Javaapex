@@ -598,6 +598,29 @@ class MigrationOrchestrator:
                 request.source_repo_url,
             )
 
+        # ── Pre/Post Migration Validation (compile check + functional tests) ──
+        pre_migration_snapshot = None
+        try:
+            from services.pre_post_migration_validator import PrePostMigrationValidator
+            validator = PrePostMigrationValidator()
+
+            # Run PRE-migration validation on the original source
+            if original_source_for_tests and os.path.isdir(str(original_source_for_tests)):
+                self.job_service.add_log(job_id, "Running pre-migration compile & test validation...")
+                pre_migration_snapshot = await validator.run_pre_migration(
+                    str(original_source_for_tests)
+                )
+                self.job_service.add_log(
+                    job_id,
+                    f"Pre-migration: compile={'PASS' if pre_migration_snapshot.compile.success else 'FAIL'} "
+                    f"tests_run={pre_migration_snapshot.tests.tests_run} "
+                    f"passed={pre_migration_snapshot.tests.tests_passed} "
+                    f"failed={pre_migration_snapshot.tests.tests_failed}",
+                )
+        except Exception as pre_val_err:
+            logger.warning("Pre-migration validation failed (non-fatal): %s", pre_val_err)
+            self.job_service.add_log(job_id, f"Pre-migration validation skipped: {pre_val_err}")
+
         llm_provider = "ford_llm"
         use_llm_tests = getattr(request, "use_llm_tests", True)
         test_result = await self.migration_service.run_tests(
@@ -608,6 +631,43 @@ class MigrationOrchestrator:
             functional_test_execution_mode=getattr(request, "functional_test_execution_mode", "auto"),
             original_source_path=original_source_for_tests,
         )
+
+        # ── Post-migration validation + comparison ──
+        try:
+            if pre_migration_snapshot is not None:
+                from services.pre_post_migration_validator import PrePostMigrationValidator
+                validator = PrePostMigrationValidator()
+                self.job_service.add_log(job_id, "Running post-migration compile & test validation...")
+                post_migration_snapshot = await validator.run_post_migration(
+                    clone_path,
+                    pre_snapshot=pre_migration_snapshot,
+                    inject_functional_tests=True,
+                )
+                comparison = validator.compare(pre_migration_snapshot, post_migration_snapshot)
+                health_score = comparison.get("migration_health_score", 0)
+
+                self.job_service.add_log(
+                    job_id,
+                    f"Post-migration: compile={'PASS' if post_migration_snapshot.compile.success else 'FAIL'} "
+                    f"tests_run={post_migration_snapshot.tests.tests_run} "
+                    f"passed={post_migration_snapshot.tests.tests_passed} "
+                    f"failed={post_migration_snapshot.tests.tests_failed} "
+                    f"injected_tests={post_migration_snapshot.functional_tests_injected}",
+                )
+                self.job_service.add_log(
+                    job_id,
+                    f"Migration Health Score: {health_score}/100 "
+                    f"(compile: {comparison['compile']['status']}, "
+                    f"new_errors: {len(comparison['compile']['new_errors'])}, "
+                    f"fixed_errors: {len(comparison['compile']['fixed_errors'])})",
+                )
+
+                # Persist comparison on the job for UI display
+                job.migration_validation = comparison
+                test_result["migration_validation"] = comparison
+        except Exception as post_val_err:
+            logger.warning("Post-migration validation failed (non-fatal): %s", post_val_err)
+            self.job_service.add_log(job_id, f"Post-migration validation skipped: {post_val_err}")
 
         job.api_endpoints_validated = test_result.get("total_endpoints", 0)
         job.api_endpoints_working = test_result.get("working_endpoints", 0)

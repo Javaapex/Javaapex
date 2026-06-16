@@ -130,6 +130,7 @@ from routers.migration_router import create_migration_router
 from routers.migration_report_router import create_migration_report_router
 from routers.microservice_eligibility_router import router as microservice_eligibility_router
 from routers.strategy_prompt_router import router as strategy_prompt_router
+from routers.migration_validation_router import router as migration_validation_router
 from db.router import router as db_router
 from services.artifact_service import ArtifactService
 from services.fossa_service import FossaConfigurationError, FossaExecutionError, FossaService
@@ -264,6 +265,7 @@ app.include_router(local_project_router, prefix="/api")
 app.include_router(microservice_eligibility_router, prefix="/api")
 app.include_router(db_router)
 app.include_router(strategy_prompt_router, prefix="/api")
+app.include_router(migration_validation_router)
 
 # CORS middleware
 app.add_middleware(

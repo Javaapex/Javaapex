@@ -1586,7 +1586,7 @@ class MigrationService:
             'org.apache.logging.log4j': {'groupId': 'org.apache.logging.log4j', 'artifactId': 'log4j-core', 'version': '2.22.0'},
             'javax.persistence': {'groupId': 'jakarta.persistence', 'artifactId': 'jakarta.persistence-api', 'version': '3.1.0'},
             'jakarta.persistence': {'groupId': 'jakarta.persistence', 'artifactId': 'jakarta.persistence-api', 'version': '3.1.0'},
-            'lombok': {'groupId': 'org.projectlombok', 'artifactId': 'lombok', 'version': '1.18.30', 'scope': 'provided'},
+            'lombok': {'groupId': 'org.projectlombok', 'artifactId': 'lombok', 'version': '1.18.42', 'scope': 'provided'},
         }
 
         added_deps = set()
@@ -2016,30 +2016,38 @@ class ApplicationTest {{
                     content = content.replace("</project>", f"{properties_section}</project>")
                     modified = True
 
-            # Update Spring Boot version if present (for Java 17+ compatibility)
-            if int(effective_target_version) >= 17:
-                if current_parent_version and current_parent_version != "3.2.0":
-                    result["updated_dependencies"].append(
-                        {
-                            "group_id": "org.springframework.boot",
-                            "artifact_id": "spring-boot-starter-parent",
-                            "current_version": current_parent_version,
-                            "new_version": "3.2.0",
-                            "source": "spring_boot_parent_update",
-                        }
-                    )
+            # Determine target Spring Boot version for dependency update records
+            if int(effective_target_version) >= 25:
+                boot_target = "4.0.0"
+            elif int(effective_target_version) >= 17:
+                boot_target = "3.2.0"
+            else:
+                boot_target = None
+
+            if boot_target and current_parent_version and current_parent_version != boot_target:
+                result["updated_dependencies"].append(
+                    {
+                        "group_id": "org.springframework.boot",
+                        "artifact_id": "spring-boot-starter-parent",
+                        "current_version": current_parent_version,
+                        "new_version": boot_target,
+                        "source": "spring_boot_parent_update",
+                    }
+                )
 
                 content = re.sub(
                     r"(<spring-boot\.version>)2\.[0-9]+\.[0-9]+\.RELEASE(</spring-boot\.version>)",
-                    r"\g<1>3.2.0\g<2>",
+                    rf"\g<1>{boot_target}\g<2>",
                     content,
                 )
                 content = re.sub(
                     r"(<spring-boot\.version>)2\.[0-9]+\.[0-9]+(</spring-boot\.version>)",
-                    r"\g<1>3.2.0\g<2>",
+                    rf"\g<1>{boot_target}\g<2>",
                     content,
                 )
                 content = self._migrate_javax_to_jakarta(content)
+
+            content = self._cleanup_maven_pom(content, effective_target_version)
 
             if content != original_content:
                 with open(pom_path, "w", encoding="utf-8") as handle:
@@ -2051,8 +2059,8 @@ class ApplicationTest {{
                     pom_path,
                 )
                 result["files_modified"] = 1
-                result["issues_fixed"] = 2 if int(effective_target_version) >= 17 else 0
-                result["changes"].append("Updated Spring Boot to 3.2.0")
+                result["issues_fixed"] = 3 if int(effective_target_version) >= 25 else (2 if int(effective_target_version) >= 17 else 0)
+                result["changes"].append(f"Updated Spring Boot to {boot_target or '3.2.0'}")
                 return result
 
             return result
@@ -2091,6 +2099,56 @@ class ApplicationTest {{
             )
 
         return pom_content
+
+    def _cleanup_maven_pom(self, pom: str, target_version: str) -> str:
+        """Post-process pom.xml to fix common issues: Spring Boot version, invalid starters, Lombok, trailing whitespace."""
+        target_int = int(re.sub(r'[^\d].*', '', target_version or '0') or '0')
+
+        # Determine required Spring Boot version based on target Java version
+        if target_int >= 25:
+            required_boot = "4.0.0"
+        elif target_int >= 22:
+            required_boot = "3.3.0"
+        elif target_int >= 17:
+            required_boot = "3.2.0"
+        else:
+            required_boot = None
+
+        if required_boot:
+            parent_match = re.search(
+                r"(<parent>.*?<groupId>\s*org\.springframework\.boot\s*</groupId>"
+                r".*?<artifactId>\s*spring-boot-starter-parent\s*</artifactId>"
+                r".*?<version>\s*)([^<\s]+)(\s*</version>.*?</parent>)",
+                pom, re.DOTALL | re.IGNORECASE,
+            )
+            if parent_match:
+                current = parent_match.group(2).strip()
+                current_parts = [int(x) for x in current.split('.')[:3]]
+                required_parts = [int(x) for x in required_boot.split('.')[:3]]
+                if current_parts < required_parts:
+                    pom = pom[:parent_match.start(2)] + required_boot + pom[parent_match.end(2):]
+
+        # Fix invalid starter names (LLM sometimes hallucinates these)
+        pom = pom.replace("spring-boot-starter-webmvc-test", "spring-boot-starter-test")
+        pom = pom.replace("spring-boot-starter-webmvc", "spring-boot-starter-web")
+
+        # Fix trailing whitespace in artifactId/name
+        pom = re.sub(r'(<(?:artifactId|name)>)\s+(</\1)', r'\1\2', pom)
+
+        # Pin Lombok to a JDK-25-compatible version for Java 25+
+        if target_int >= 25:
+            pom = re.sub(
+                r'(<artifactId>lombok</artifactId>\s*<version>)[^<]+(</version>)',
+                r'\g<1>1.18.42\g<2>',
+                pom,
+            )
+            pom = re.sub(
+                r'(<artifactId>lombok</artifactId>\s*)(?!<version>)',
+                r'\1<version>1.18.42</version>\n            ',
+                pom,
+            )
+
+        return pom
 
     async def _apply_java_migrations(
         self,
@@ -2236,11 +2294,11 @@ class ApplicationTest {{
                 fixes += 1
 
         # 7. UNNAMED PATTERNS - Variables like ignored (underscore)
-        # Check for catch blocks with unused exceptions
+        # Only replace empty catch blocks (non-empty ones still reference the variable)
         if re.search(r'catch\s*\(\s*\w+\s+\w+\s*\)\s*\{[\s]*\}', content):
             content = re.sub(
-                r'catch\s*\(\s*(\w+)\s+\w+\s*\)',
-                r'catch (\1 _)',
+                r'catch\s*\(\s*(\w+)\s+\w+\s*\)\s*\{[\s]*\}',
+                r'catch (\1 _) {}',
                 content
             )
             changes.append("Added unnamed pattern for unused catch variables")
@@ -3571,7 +3629,8 @@ test {
         source_snapshot = build_migration_policy_service.inspect_build_content(build_content, source_build_tool)
         target_java_version = build_migration_policy_service.resolve_java_target(source_snapshot.java_version)
         target_spring_boot_version = build_migration_policy_service.resolve_spring_boot_target(
-            source_snapshot.spring_boot_version
+            source_snapshot.spring_boot_version,
+            target_java_version=target_java_version,
         )
 
         # Dynamic Instructions based on Target Version
@@ -3724,7 +3783,8 @@ test {
         source_snapshot = build_migration_policy_service.inspect_build_content(build_content, source_build_tool)
         target_java_version = build_migration_policy_service.resolve_java_target(source_snapshot.java_version)
         target_spring_boot_version = build_migration_policy_service.resolve_spring_boot_target(
-            source_snapshot.spring_boot_version
+            source_snapshot.spring_boot_version,
+            target_java_version=target_java_version,
         )
 
         dynamic_prompts = []
@@ -3863,12 +3923,11 @@ test {
         return {
             "service": "build_conversion",
             "process_id": os.getpid(),
-            "default_provider": "ford_llm",
+            "default_provider": "groq",
             "total_requests": self._build_conversion_request_count,
             "provider_request_counts": dict(sorted(self._build_conversion_provider_counts.items())),
             "cache": get_llm_cache_stats(),
             "models": {
-                "ford_llm": preferred_llm_service.ford_llm_model,
                 "groq": preferred_llm_service.groq_model,
                 "claude": preferred_llm_service.claude_model,
                 "openai": preferred_llm_service.openai_model,

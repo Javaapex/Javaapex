@@ -242,7 +242,7 @@ def create_migration_job_router(
     @router.post("/migration/{job_id}/rerun-tests")
     async def rerun_migration_tests(
         job_id: str,
-        llm_provider: str = "ford_llm",
+        llm_provider: str = "groq",
         use_llm_tests: bool = True,
     ):
         """Re-run tests for an existing migration job and update its test metrics."""

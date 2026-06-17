@@ -127,7 +127,7 @@ class DependencyMigrationAnalyzer:
             "spring_boot": "3.2.5",
             "java": "17",
             "mysql": "8.3.0",
-            "lombok": "1.18.30",
+            "lombok": "1.18.42",
             "jacoco": "0.8.11",
             "surefire": "3.2.5",
             "spotbugs": "4.8.5",

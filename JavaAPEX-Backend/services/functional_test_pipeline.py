@@ -37,7 +37,7 @@ class FunctionalTestPipelineService:
         self,
         project_path: str,
         job_id: str = "default",
-        llm_provider: str = "ford_llm",
+        llm_provider: str = "groq",
         user_selected_tool: Optional[str] = None,
         execution_mode: Optional[str] = "auto",
         original_source_path: Optional[str] = None,

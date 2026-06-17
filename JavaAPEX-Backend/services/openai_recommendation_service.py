@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class OpenAIRecommendationService:
     def __init__(self) -> None:
-        self.primary_provider = "ford_llm"
-        self.secondary_provider = "groq"
+        self.primary_provider = "groq"
+        self.secondary_provider = "openai"
         self.fallback_provider = "openai"
 
     async def recommend_target_version(self, analysis_payload: Dict[str, Any]) -> Dict[str, Any]:

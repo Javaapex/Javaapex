@@ -55,7 +55,25 @@ class BuildMigrationPolicyService:
             return str(source_java_version).strip()
         return minimum_target
 
-    def resolve_spring_boot_target(self, source_boot_version: Optional[str], minimum_target: str = "3.2.5") -> str:
+    def resolve_spring_boot_target(self, source_boot_version: Optional[str], target_java_version: Optional[str] = None) -> str:
+        # Pick a Spring Boot version compatible with the target Java version.
+        # Java 25 -> needs Boot 4.0.0+ (ASM supports class v69).
+        # Java 22 -> needs Boot 3.3.0+.
+        # Java 17-21 -> Boot 3.2.5+ is fine.
+        if target_java_version:
+            try:
+                ver = int(re.sub(r'[^\d].*', '', target_java_version) or '0')
+                if ver >= 25:
+                    minimum_target = "4.0.0"
+                elif ver >= 22:
+                    minimum_target = "3.3.0"
+                else:
+                    minimum_target = "3.2.5"
+            except ValueError:
+                minimum_target = "3.2.5"
+        else:
+            minimum_target = "3.2.5"
+
         if self._is_higher_version(source_boot_version, minimum_target):
             return str(source_boot_version).strip()
         return minimum_target

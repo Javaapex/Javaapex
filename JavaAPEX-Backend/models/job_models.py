@@ -109,8 +109,8 @@ class MigrationRequest(BaseModel):
     run_tests: bool = Field(default=True, description="Run tests after migration")
     use_llm_tests: bool = Field(default=True, description="Use an LLM to generate tests and a test plan")
     llm_test_provider: str = Field(
-        default="ford_llm",
-        description="LLM provider for test generation. Uses Ford LLM as primary, with Groq/Claude/OpenAI fallback.",
+        default="groq",
+        description="LLM provider for test generation. Uses Groq as primary, with Claude/OpenAI fallback.",
     )
     run_sonar: bool = Field(default=True, description="Run SonarQube analysis")
     run_fossa: bool = Field(default=False, description="Run FOSSA license and dependency scan")

@@ -15,7 +15,7 @@ import subprocess
 class CoverageOptimizer:
     """Orchestrates test generation to achieve 80% coverage targets."""
 
-    def __init__(self, project_path: str, provider: str = "ford_llm", job_id: str = "default"):
+    def __init__(self, project_path: str, provider: str = "groq", job_id: str = "default"):
         self.project_path = Path(project_path)
         self.provider = provider
         self.job_id = job_id
@@ -214,9 +214,9 @@ async def main():
     )
     parser.add_argument(
         "--provider",
-        default="ford_llm",
-        choices=["ford_llm", "groq", "openai", "huggingface", "ollama"],
-        help="LLM provider for test generation (default: ford_llm)"
+        default="groq",
+        choices=["groq", "openai", "huggingface", "ollama"],
+        help="LLM provider for test generation (default: groq)"
     )
     parser.add_argument(
         "--job-id",

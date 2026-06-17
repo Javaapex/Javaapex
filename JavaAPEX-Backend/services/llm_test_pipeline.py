@@ -46,16 +46,11 @@ from utils.config import (
     FORD_LLM_API_ENDPOINT,
     FORD_LLM_API_KEY,
     FORD_LLM_AUTH_TYPE,
-    FORD_LLM_BASE_URL,
     FORD_LLM_ENABLED,
     FORD_LLM_EXTRA_MODELS,
     FORD_LLM_MAX_RETRIES,
     FORD_LLM_MAX_TOKENS,
     FORD_LLM_MODEL,
-    FORD_LLM_OAUTH_CLIENT_ID,
-    FORD_LLM_OAUTH_CLIENT_SECRET,
-    FORD_LLM_OAUTH_SCOPE,
-    FORD_LLM_OAUTH_TOKEN_URL,
     FORD_LLM_PROXY_URL,
     FORD_LLM_TEMPERATURE,
     FORD_LLM_TIMEOUT,
@@ -122,8 +117,6 @@ class LLMTestPipelineService:
         self.ford_llm_max_retries = FORD_LLM_MAX_RETRIES
         self.ford_llm_proxy_url = FORD_LLM_PROXY_URL
         self.ford_llm_verify_ssl = FORD_LLM_VERIFY_SSL
-        self._ford_oauth_token: str | None = None
-        self._ford_oauth_token_expiry: float = 0.0
         # Legacy providers (fallback)
         self.openai_key = OPENAI_API_KEY
         self.openai_base_url = OPENAI_BASE_URL
@@ -164,12 +157,12 @@ class LLMTestPipelineService:
         self._llm_request_sequence: int = 0
         self._provider_request_counts: Dict[str, int] = {}
         self._provider_aliases = {
-            "default": "ford_llm",
-            "ford": "ford_llm",
-            "ford_llm": "ford_llm",
-            "fordllm": "ford_llm",
-            "free": "ford_llm",
-            "paid": "ford_llm",
+            "default": "groq",
+            "ford": "groq",
+            "ford_llm": "groq",
+            "fordllm": "groq",
+            "free": "groq",
+            "paid": "groq",
             "gpt4": "openai",
             "gpt-4": "openai",
             "gpt-4.1": "openai",
@@ -1102,7 +1095,7 @@ class LLMTestPipelineService:
         }
 
     def _repair_annotation_processor_paths(self, pom: str) -> str:
-        lombok_version = "1.18.30"
+        lombok_version = "1.18.42"
 
         dependency_versions: Dict[tuple[str, str], str] = {}
         for match in re.finditer(
@@ -2084,15 +2077,14 @@ java {{
         content = re.sub(r'\n?```\s*$', '', content, flags=re.MULTILINE)  # Remove code fence closing
         content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)  # Remove HTML comments
 
-        # Extract package declaration
-        pkg_match = re.search(r'^\s*package\s+([\w.]+)\s*;', content, re.MULTILINE)
-        package_decl = f"package {pkg_match.group(1)};" if pkg_match else f"package {package};"
+        # Always use the expected package (from target), ignore any hallucinated package from LLM
+        package_decl = f"package {package};"
 
-        # Extract all imports
+        # Extract all imports, converting javax → jakarta
         import_lines = []
         for line in content.split('\n'):
             if line.strip().startswith('import '):
-                import_lines.append(line)
+                import_lines.append(re.sub(r"\bjavax\.", "jakarta.", line))
 
         # Extract all test methods (anything starting with @Test or starting with "void test" or "public void test")
         test_methods = []
@@ -2171,7 +2163,7 @@ java {{
         return ""
 
     def _validate_java_test_structure(self, content: str, package: str, class_name: str) -> bool:
-        """Validate that Java test code has proper class structure and isn't malformed."""
+        """Validate that Java test code has proper class structure, matches expected package, and isn't malformed."""
         if not content or not content.strip():
             logger.debug(f"Validation failed for {class_name}: content is empty")
             return False
@@ -2180,6 +2172,14 @@ java {{
         if '`' in content:
             logger.debug(f"Validation failed for {class_name}: contains backticks (markdown artifacts)")
             return False
+
+        # Check that the generated package matches the expected package (prevents hallucinated test files)
+        pkg_match = re.search(r'^\s*package\s+([\w.]+)\s*;', content, re.MULTILINE)
+        if pkg_match:
+            actual_pkg = pkg_match.group(1)
+            if actual_pkg != package:
+                logger.debug(f"Validation failed for {class_name}: package mismatch (expected={package}, actual={actual_pkg})")
+                return False
 
         # Check for class declaration (public class, class, @interface, record, enum)
         class_pattern = r'(?:public\s+)?(?:abstract\s+)?(?:final\s+)?(?:class|interface|enum|record)\s+\w+'
@@ -2228,6 +2228,9 @@ java {{
         """
         junit_style = (junit_style or "junit5").lower()
         out = content or ""
+
+        # Javax -> Jakarta for ALL test files regardless of JUnit style
+        out = re.sub(r"\bjavax\.", "jakarta.", out)
 
         # â”€â”€ Self-Healing: Fix common Mockito/JUnit import omissions â”€â”€
         if "Mockito" in out or "when(" in out or "verify(" in out or "any(" in out or "anyString(" in out:
@@ -2904,6 +2907,15 @@ java {{
         # Javax -> Jakarta imports (common during Spring Boot 3 / Jakarta migration).
         out = re.sub(r"\bjavax\.", "jakarta.", out)
 
+        # Remove garbage lines that are broken package/import remnants (e.g. ".example.project.service;")
+        out = re.sub(r'^\s*\.[\w.]+;\s*$', '', out, flags=re.MULTILINE)
+
+        # Fix wrong MimeMessage import: Spring's MimeMessage wrapper -> Jakarta MimeMessage
+        out = out.replace(
+            "import org.springframework.mail.javamail.MimeMessage;",
+            "import jakarta.mail.internet.MimeMessage;",
+        )
+
         return out
 
     async def generate_test_plan(self, project_path: str, provider: str, project_kind: str, job_id: str = "") -> str:
@@ -3101,7 +3113,6 @@ java {{
             return ""
 
         provider_callers = {
-            "ford_llm": self._call_ford_llm,
             "groq": self._call_groq,
             "anthropic": self._call_anthropic,
             "openai": self._call_openai,
@@ -3110,7 +3121,7 @@ java {{
             "deepseek": self._call_deepseek,
         }
         providers_to_try = [provider]
-        for fallback in ("ford_llm", "groq", "anthropic", "openai", "huggingface", "deepseek", "ollama"):
+        for fallback in ("groq", "anthropic", "openai", "huggingface", "deepseek", "ollama"):
             if fallback not in providers_to_try:
                 providers_to_try.append(fallback)
 
@@ -3124,8 +3135,6 @@ java {{
             if not handler:
                 continue
 
-            if candidate == "ford_llm" and not (self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2")):
-                continue
             if candidate == "groq" and not (self.groq_keys or self.groq_key):
                 continue
             if candidate == "openai" and not self.openai_key:
@@ -3166,8 +3175,6 @@ java {{
 
     def _provider_model_name(self, provider: str) -> str:
         provider = self._normalize_provider(provider)
-        if provider == "ford_llm":
-            return self.ford_llm_model or "ford_llm"
         if provider == "groq":
             return self.groq_model or "groq"
         if provider == "anthropic":
@@ -3183,11 +3190,11 @@ java {{
         return provider or "offline"
 
     def get_runtime_stats(self) -> Dict[str, Any]:
-        providers = ("ford_llm", "anthropic", "deepseek", "groq", "huggingface", "offline", "ollama", "openai")
+        providers = ("groq", "anthropic", "deepseek", "huggingface", "offline", "ollama", "openai")
         return {
             "service": "llm_test_pipeline",
             "process_id": os.getpid(),
-            "default_provider": "ford_llm",
+            "default_provider": "groq",
             "total_requests": self._llm_request_sequence,
             "provider_request_counts": dict(sorted(self._provider_request_counts.items())),
             "cache": get_llm_cache_stats(),
@@ -3414,121 +3421,9 @@ java {{
             "Return only Markdown, no explanation."
         )
 
-    async def _get_ford_auth_token(self) -> str:
-        """Get Ford LLM auth token — uses centralized token_manager for auto-refresh."""
-        # Try centralized token manager first
-        try:
-            from services.token_manager import ford_token_manager
-            if ford_token_manager.is_configured:
-                token = ford_token_manager.ensure_fresh_token()
-                if token:
-                    self.ford_llm_api_key = token  # keep local copy in sync
-                    return token
-        except Exception:
-            pass
-
-        # Fallback: local OAuth2 refresh
-        has_oauth = bool(FORD_LLM_OAUTH_TOKEN_URL and FORD_LLM_OAUTH_CLIENT_ID and FORD_LLM_OAUTH_CLIENT_SECRET)
-        if has_oauth:
-            now = time.time()
-            if self._ford_oauth_token and now < self._ford_oauth_token_expiry - 60:
-                return self._ford_oauth_token
-            import httpx as _httpx
-            data = {
-                "grant_type": "client_credentials",
-                "client_id": FORD_LLM_OAUTH_CLIENT_ID,
-                "client_secret": FORD_LLM_OAUTH_CLIENT_SECRET,
-                "scope": FORD_LLM_OAUTH_SCOPE,
-            }
-            proxy = self.ford_llm_proxy_url or None
-            async with _httpx.AsyncClient(timeout=30.0, **_proxy_kw(proxy), verify=self.ford_llm_verify_ssl) as client:
-                resp = await client.post(FORD_LLM_OAUTH_TOKEN_URL, data=data)
-                resp.raise_for_status()
-                token_data = resp.json()
-            self._ford_oauth_token = token_data["access_token"]
-            self._ford_oauth_token_expiry = time.time() + token_data.get("expires_in", 3600)
-            return self._ford_oauth_token
-        return self.ford_llm_api_key
-
     async def _call_ford_llm(self, prompt: str) -> str:
-        """Call Ford LLM API (OpenAI-compatible chat/completions endpoint)."""
-        if not self.ford_llm_enabled:
-            return ""
-        token = await self._get_ford_auth_token()
-        if not token:
-            logger.warning("Ford LLM API key / OAuth token not available.")
-            return ""
-
-        url = self.ford_llm_api_endpoint
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        payload = {
-            "model": self.ford_llm_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": FORD_LLM_MAX_TOKENS,
-            "temperature": FORD_LLM_TEMPERATURE,
-        }
-        if self.ford_llm_extra_models:
-            payload["extra_body"] = {"models": self.ford_llm_extra_models}
-
-        proxy = self.ford_llm_proxy_url or None
-        try:
-            import httpx as _httpx
-            for attempt in range(1, self.ford_llm_max_retries + 1):
-                try:
-                    async with _httpx.AsyncClient(
-                        timeout=float(self.ford_llm_timeout),
-                        **_proxy_kw(proxy),
-                        verify=self.ford_llm_verify_ssl,
-                    ) as client:
-                        response = await client.post(url, headers=headers, json=payload)
-                        if response.status_code == 401:
-                            # Force-refresh token on 401
-                            try:
-                                from services.token_manager import ford_token_manager
-                                if ford_token_manager.is_configured:
-                                    token = ford_token_manager.force_refresh()
-                                else:
-                                    token = await self._get_ford_auth_token()
-                            except Exception:
-                                token = await self._get_ford_auth_token()
-                            headers["Authorization"] = f"Bearer {token}"
-                            response = await client.post(url, headers=headers, json=payload)
-                        if response.status_code == 400:
-                            body_text = (response.text or "").lower()
-                            if "temperature" in body_text:
-                                payload.pop("temperature", None)
-                                logger.info("Model %s does not support custom temperature; retrying without it", self.ford_llm_model)
-                                continue
-                        if response.status_code == 422:
-                            payload["max_tokens"] = max(512, payload["max_tokens"] // 2)
-                            logger.warning("Ford LLM 422 — reducing max_tokens to %d", payload["max_tokens"])
-                            continue
-                        response.raise_for_status()
-                        data = response.json()
-                        choices = data.get("choices") or []
-                        if choices:
-                            msg = choices[0].get("message", {})
-                            return (msg.get("content") or "").strip()
-                        return ""
-                except _httpx.HTTPStatusError as exc:
-                    status = exc.response.status_code
-                    if status in (504, 502, 503, 429) and attempt < self.ford_llm_max_retries:
-                        await asyncio.sleep(min(2 ** attempt, 10))
-                        continue
-                    raise
-                except Exception:
-                    if attempt < self.ford_llm_max_retries:
-                        await asyncio.sleep(min(2 ** attempt, 10))
-                        continue
-                    raise
-        except Exception as exc:
-            logger.error("Ford LLM request failed: %s", exc)
-            return ""
-        return ""
+        """Delegate to Groq API (Ford LLM replaced by Groq)."""
+        return await self._call_groq(prompt)
 
     async def _call_openai(self, prompt: str) -> str:
         if self._openai_disabled_reason:
@@ -3714,6 +3609,7 @@ java {{
         self.ford_llm_max_retries = cfg.FORD_LLM_MAX_RETRIES
         self.ford_llm_proxy_url = cfg.FORD_LLM_PROXY_URL
         self.ford_llm_verify_ssl = cfg.FORD_LLM_VERIFY_SSL
+        # FORD_LLM_* configs now read from GROQ env vars — see config.py
 
         self.groq_key = cfg.GROQ_API_KEY
         self.groq_keys = cfg.GROQ_API_KEYS.copy()

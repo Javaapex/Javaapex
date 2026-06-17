@@ -277,23 +277,16 @@ app.add_middleware(
 )
 logger.info("Configured CORS allowed origins: %s", CORS_ALLOWED_ORIGINS)
 
-# ── Ford LLM Token Auto-Refresh ──
-# Fetches an initial token on startup and refreshes every 50 minutes
-# so the FORD_LLM_API_KEY env var always has a valid bearer token.
+# ── Groq LLM API Key Check ──
+# Groq uses static API keys — no OAuth token refresh needed.
 try:
     from services.token_manager import ford_token_manager
     if ford_token_manager.is_configured:
-        ford_token_manager.ensure_fresh_token()
-        ford_token_manager.start_auto_refresh(interval_seconds=3000)  # every 50 min
-        logger.info(
-            "Ford LLM token manager active — auto-refresh every 50 min (token #%d, ~%ds remaining)",
-            ford_token_manager.refresh_count,
-            round(ford_token_manager.remaining_seconds),
-        )
+        logger.info("Groq LLM API key is configured (via GROQ_API_KEY / FORD_LLM_API_KEY)")
     else:
-        logger.info("Ford LLM token manager skipped — client credentials not configured")
-except Exception as _tm_err:
-    logger.warning("Ford LLM token manager init failed (non-fatal): %s", _tm_err)
+        logger.warning("Groq LLM API key is NOT configured — set GROQ_API_KEY in .env to enable Groq LLM")
+except Exception:
+    pass
 
 
 def _first_nonempty_token(*values: Optional[str]) -> str:
@@ -11026,19 +11019,17 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     lts_versions = ["8", "11", "17", "21", "25"]
     feature_release_versions = ["22", "23", "24"] # Keep for source detection, but maybe not as recommended targets if not in Docker
 
-    normalized_provider = str(request.llm_provider or "ford_llm").strip().lower()
-    if normalized_provider in {"ford", "ford_llm", "fordllm"}:
-        normalized_provider = "ford_llm"
-    elif normalized_provider in {"groq", "llama", "llama3", "llama-3", "llama-3.3"}:
+    normalized_provider = str(request.llm_provider or "groq").strip().lower()
+    if normalized_provider in {"ford", "ford_llm", "fordllm", "groq", "llama", "llama3", "llama-3", "llama-3.3"}:
         normalized_provider = "groq"
-    if normalized_provider in {"chatgpt", "gpt-4", "gpt4", "gpt-4.1", "openai"}:
+    elif normalized_provider in {"chatgpt", "gpt-4", "gpt4", "gpt-4.1", "openai"}:
         normalized_provider = "openai"
     elif normalized_provider in {"claude", "anthropic", "paid"}:
         normalized_provider = "claude"
 
     request_payload = request.model_dump(mode="json")
 
-    if normalized_provider in {"ford_llm", "groq", "claude", "openai"}:
+    if normalized_provider in {"groq", "claude", "openai"}:
         try:
             openai_recommendation = await openai_recommendation_service.recommend_target_version(request_payload)
             # Cap the recommendation to 25 if LLM hallucinated higher

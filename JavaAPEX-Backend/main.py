@@ -519,8 +519,23 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    def _is_auth_required_error(message: str) -> bool:
+        normalized = (message or "").lower()
+        auth_markers = (
+            "private repository",
+            "private or inaccessible",
+            "personal access token",
+            "repo scope",
+            "access denied",
+            "does not have access",
+            "not accessible with the provided github token",
+            "requires authentication",
+        )
+        return any(marker in normalized for marker in auth_markers)
+
     # --- Attempt 1: try with provided token or the server default token ---
     effective_token = token.strip() if token and token.strip() else DEFAULT_GITHUB_TOKEN
+    first_message = ""
     try:
         info = await github_service.get_repo_info(effective_token, owner, repo, repo_url)
         is_private = info.get("is_private", False)
@@ -540,6 +555,7 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
         logger.debug("Visibility check with token failed for %s/%s: %s", owner, repo, first_message)
 
     # --- Attempt 2: try anonymous (no token) — public repos are accessible without auth ---
+    anonymous_message = ""
     try:
         info = await github_service.get_repo_info("", owner, repo, repo_url)
         is_private = info.get("is_private", False)
@@ -555,13 +571,21 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
     except Exception:
         pass  # anonymous access also failed — repo is genuinely private or inaccessible
 
-    # --- Both attempts failed: repo is private or inaccessible ---
+    if _is_auth_required_error(first_message):
+        return {
+            "owner": owner,
+            "repo": repo,
+            "visibility": "private_or_inaccessible",
+            "requires_token": True,
+            "message": "Repository appears private or inaccessible. Provide a GitHub Personal Access Token with 'repo' scope.",
+        }
+
     return {
         "owner": owner,
         "repo": repo,
-        "visibility": "private_or_inaccessible",
-        "requires_token": True,
-        "message": "Repository appears private or inaccessible. Provide a GitHub Personal Access Token with 'repo' scope.",
+        "visibility": "unknown",
+        "requires_token": False,
+        "message": first_message or "Unable to verify repository visibility right now.",
     }
 
 @app.post("/api/github/generate-kt-document")

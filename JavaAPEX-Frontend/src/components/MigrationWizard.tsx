@@ -1320,7 +1320,9 @@ export default function MigrationWizard() {
       normalizedMessage.includes("private repository") ||
       normalizedMessage.includes("repository not found or is private") ||
       normalizedMessage.includes("provide a personal access token") ||
-      normalizedMessage.includes("access denied")
+      normalizedMessage.includes("access denied") ||
+      normalizedMessage.includes("repo scope") ||
+      normalizedMessage.includes("does not have access")
     );
   };
 
@@ -4367,7 +4369,7 @@ export default function MigrationWizard() {
         getRepoVisibility(normalizedUrl, currentToken)
         .then((visibility) => {
           if (cancelled) return;
-          if (visibility.requires_token) {
+          if (visibility.requires_token || visibility.visibility === "private") {
             setIsPrivateRepo(true);
             setError("");
             resetAccessTokenValidationState();
@@ -4385,9 +4387,11 @@ export default function MigrationWizard() {
           // succeeds for public repos, so reaching here means the repo is
           // genuinely private/inaccessible or the server couldn't be reached.
           const isUrlError = err?.status === 400;
-          setIsPrivateRepo(!isUrlError);
-          setError("");
-          if (!isUrlError) {
+          const message = err instanceof Error ? err.message : "";
+          const shouldShowPrivateRepoState = !isUrlError && isPrivateRepoAccessError(message);
+          setIsPrivateRepo(shouldShowPrivateRepoState);
+          setError(shouldShowPrivateRepoState ? "" : message || "");
+          if (shouldShowPrivateRepoState) {
             resetAccessTokenValidationState();
           }
         })

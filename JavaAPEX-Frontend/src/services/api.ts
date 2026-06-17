@@ -246,7 +246,7 @@ export interface LocalProjectAnalysisResponse {
 export interface RepoVisibilityInfo {
   owner: string;
   repo: string;
-  visibility: "public" | "private" | "private_or_inaccessible";
+  visibility: "public" | "private" | "private_or_inaccessible" | "unknown";
   requires_token: boolean;
   message: string;
 }

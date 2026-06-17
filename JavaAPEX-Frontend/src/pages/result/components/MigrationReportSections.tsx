@@ -1126,10 +1126,10 @@ export function MigrationUnitTestSection({
             </div>
           </div>
           <div style={styles.testSummaryReportGrid}>
-            <div style={styles.testSummaryReportCard}>
+            {/* <div style={styles.testSummaryReportCard}>
               <div style={styles.testSummaryReportValue}>{functionalTesting.total_tests ?? 0}</div>
               <div style={styles.testSummaryReportLabel}>Generated</div>
-            </div>
+            </div> */}
             <div style={styles.testSummaryReportCard}>
               <div style={styles.testSummaryReportValue}>{functionalExecution?.tests_run ?? 0}</div>
               <div style={styles.testSummaryReportLabel}>Executed</div>

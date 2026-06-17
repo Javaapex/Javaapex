@@ -371,6 +371,8 @@ class FunctionalTestPipelineService:
                         "page_type": page_type,
                         "actions": actions,
                     }
+                    if isinstance(route_info, dict) and route_info.get("component"):
+                        test_entry["component"] = route_info["component"]
                     if pd.get("_spa_js"):
                         test_entry["_spa_js"] = pd["_spa_js"]
                     tests.append(test_entry)
@@ -378,7 +380,7 @@ class FunctionalTestPipelineService:
                     if pd.get("forms"):
                         neg_actions = self._build_negative_test_actions(route, pd)
                         if neg_actions:
-                            tests.append({
+                            neg_entry = {
                                 "name": f"Submit empty form on {route} shows validation error",
                                 "tool": "PLAYWRIGHT",
                                 "type": "ui",
@@ -386,11 +388,14 @@ class FunctionalTestPipelineService:
                                 "source_file": source,
                                 "page_type": page_type,
                                 "actions": neg_actions,
-                            })
+                            }
+                            if isinstance(route_info, dict) and route_info.get("component"):
+                                neg_entry["component"] = route_info["component"]
+                            tests.append(neg_entry)
 
                 if "SELENIUM" in tools:
                     test_name = self._build_smart_test_name(route, pd, "Selenium")
-                    tests.append({
+                    sel_entry = {
                         "name": test_name,
                         "tool": "SELENIUM",
                         "type": "legacy-ui",
@@ -398,12 +403,15 @@ class FunctionalTestPipelineService:
                         "source_file": source,
                         "page_type": page_type,
                         "actions": actions,
-                    })
+                    }
+                    if isinstance(route_info, dict) and route_info.get("component"):
+                        sel_entry["component"] = route_info["component"]
+                    tests.append(sel_entry)
                     # If page has forms, add a negative test too
                     if pd.get("forms"):
                         neg_actions = self._build_negative_test_actions(route, pd)
                         if neg_actions:
-                            tests.append({
+                            neg_sel_entry = {
                                 "name": f"Submit empty form on {route} shows validation error",
                                 "tool": "SELENIUM",
                                 "type": "legacy-ui",
@@ -411,7 +419,10 @@ class FunctionalTestPipelineService:
                                 "source_file": source,
                                 "page_type": page_type,
                                 "actions": neg_actions,
-                            })
+                            }
+                            if isinstance(route_info, dict) and route_info.get("component"):
+                                neg_sel_entry["component"] = route_info["component"]
+                            tests.append(neg_sel_entry)
 
         # --- Servlet endpoint tests (for legacy/servlet-based apps) ---
         if endpoints and ("PLAYWRIGHT" in tools or "SELENIUM" in tools):
@@ -1065,10 +1076,17 @@ class FunctionalTestPipelineService:
 
         # Leave all text fields EMPTY (don't fill them)
         # Just click submit directly to test validation
+        btn_text = (form.get("buttons") or [""])[0]
         if form.get("id"):
-            actions.append({"type": "click", "locator": f"#{form['id']} input[type=submit], #{form['id']} button[type=submit]"})
+            if btn_text:
+                actions.append({"type": "click", "locator": f"#{form['id']} button:has-text(\"{btn_text}\"), #{form['id']} input[type=submit], #{form['id']} button[type=submit]"})
+            else:
+                actions.append({"type": "click", "locator": f"#{form['id']} input[type=submit], #{form['id']} button[type=submit]"})
         else:
-            actions.append({"type": "click", "locator": "input[type=submit], button[type=submit]"})
+            if btn_text:
+                actions.append({"type": "click", "locator": f'button:has-text("{btn_text}"), input[type=submit], button[type=submit]'})
+            else:
+                actions.append({"type": "click", "locator": "input[type=submit], button[type=submit]"})
 
         # After submitting empty form, the page should still be functional (not 500)
         actions.append({"type": "assert_not_visible", "text": "500 Internal Server Error"})
@@ -5877,6 +5895,7 @@ class GeneratedMockMvcFunctionalTest {{
             lines.append(f"const response = await page.goto(`${{baseUrl}}{url}`);")
             lines.append("expect(response).not.toBeNull();")
             lines.append("expect(response!.status()).toBeLessThan(500);")
+            lines.append("await page.waitForLoadState('networkidle');")
 
         elif act_type == "mock_api":
             url_pattern = action.get("url_pattern", "*")
@@ -6081,6 +6100,7 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
   test.beforeEach(async ({{ page }}) => {{
 {mock_code}
     await page.goto(`${{baseUrl}}{route}`);
+    await page.waitForLoadState('networkidle');
   }});
 
   test('page content renders with expected elements', async ({{ page }}) => {{
@@ -6091,6 +6111,7 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
                     test_code = f"""test.describe('{suite_name}', () => {{
   test.beforeEach(async ({{ page }}) => {{
     await page.goto(`${{baseUrl}}{route}`);
+    await page.waitForLoadState('networkidle');
   }});
 
   test('page content renders without errors', async ({{ page }}) => {{
@@ -6142,6 +6163,7 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
                     suite_body = ""
                     suite_body += f"  test.beforeEach(async ({{ page }}) => {{\n"
                     suite_body += f"    await page.goto(`${{baseUrl}}{route}`);\n"
+                    suite_body += f"    await page.waitForLoadState('networkidle');\n"
                     suite_body += f"  }});\n\n"
 
                     if rendered_render:
@@ -6158,7 +6180,11 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
                         suite_body += f"  }});\n"
 
                     if rendered_render or rendered_form:
-                        suite_label = route.lstrip("/").capitalize() or "Home"
+                        comp_name = test.get("component", "")
+                        if comp_name:
+                            suite_label = comp_name.replace("Page", "").strip()
+                        else:
+                            suite_label = route.lstrip("/").capitalize() or "Home"
                         test_code = f"test.describe('{suite_label} Page', () => {{\n{suite_body}}});"
                         cases.append(test_code)
                         continue
@@ -6194,6 +6220,7 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
                 test_code += f"  const response = await page.goto(`${{baseUrl}}{route}`);\n"
                 test_code += "  expect(response).not.toBeNull();\n"
                 test_code += "  expect(response!.status()).toBeLessThan(400);\n"
+                test_code += "  await page.waitForLoadState('networkidle');\n"
                 test_code += "  const content = await page.content();\n"
                 if is_jsp:
                     test_code += "  // JSP page should render valid HTML content\n"
@@ -6254,6 +6281,7 @@ export const multiPageHistory = {json.dumps(multi_page_rows, indent=2)};
                 test_code += "  expect(response).not.toBeNull();\n"
                 test_code += "  // Route should not return a server error\n"
                 test_code += "  expect(response!.status()).not.toBe(500);\n"
+                test_code += "  await page.waitForLoadState('networkidle');\n"
                 test_code += "  const content = await page.content();\n"
                 test_code += "  expect(content).not.toContain('HTTP Status 500');\n"
                 test_code += "  expect(content).not.toContain('Service Unavailable');\n"

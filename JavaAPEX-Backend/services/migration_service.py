@@ -26,6 +26,26 @@ from services.dependency_migration_analyzer import DependencyMigrationAnalyzer
 logger = logging.getLogger(__name__)
 
 
+def _count_java_test_cases(file_paths: List[str]) -> int:
+    if not file_paths:
+        return 0
+    annotation_pattern = re.compile(r"(?m)^\s*@\s*(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b")
+    commented_pattern = re.compile(r"(?m)^\s*//\s*@\s*(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b")
+    block_comment_pattern = re.compile(r"/\*.*?\*/", re.DOTALL)
+    total = 0
+    for p in file_paths[:4000]:
+        try:
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+            text = block_comment_pattern.sub("", text)
+        except Exception:
+            continue
+        all_annotations = len(annotation_pattern.findall(text))
+        commented_annotations = len(commented_pattern.findall(text))
+        total += max(0, all_annotations - commented_annotations)
+    return total
+
+
 class MigrationService:
     def __init__(self):
         self.openrewrite_cli = os.getenv("OPENREWRITE_CLI_PATH", "rewrite-cli.jar")
@@ -2701,7 +2721,7 @@ class ApplicationTest {{
                     "llm_requests_made": 0,
                     "project_kind": "java",
                     "test_strategy": "standard_tests_with_functional_plan",
-                    "existing_tests_detected": len(_existing_test_files),
+                    "existing_tests_detected": _count_java_test_cases(_existing_test_files),
                     "existing_test_files": _existing_test_files,
                     "migrated_test_files": [],
                     "generated_tests_relative": functional_data.get("test_plan_path", ""),
@@ -2711,9 +2731,9 @@ class ApplicationTest {{
                         "repo_total_files": _repo_total_files,
                         "existing_test_files": len(_existing_test_files),
                         "new_test_files": len(_functional_gen_files),
-                        "existing_test_cases": len(_existing_test_files),
+                        "existing_test_cases": _count_java_test_cases(_existing_test_files),
                         "generated_test_cases": _functional_generated,
-                        "total_test_cases": len(_existing_test_files) + _functional_generated,
+                        "total_test_cases": _count_java_test_cases(_existing_test_files) + _functional_generated,
                     },
                     "runner": result.get("runner", {}) or {},
                     "functional_testing": functional_data,

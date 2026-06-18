@@ -2025,6 +2025,89 @@ class FunctionalTestPipelineService:
         return code
 
     @staticmethod
+    def _fix_unescaped_java_quotes(code: str) -> str:
+        """Fix unescaped double quotes inside Java string literals.
+        
+        The generated Selenium code uses locators like [placeholder="Enter email"]
+        inside Java string literals.  These inner " must be escaped as \" to compile.
+        """
+        import re as _re
+        # Find all string literals: "...content..." with possible escapes
+        # We need to handle the case where an inner " prematurely terminates the literal.
+        # Strategy: for lines with uneven quote count or suspicious patterns, 
+        # escape unescaped quotes between the outermost pair.
+        lines = code.split("\n")
+        fixed = []
+        for line in lines:
+            if '"' not in line:
+                fixed.append(line)
+                continue
+            # Check if this line has likely-unterminated strings
+            qpos = [i for i, c in enumerate(line) if c == '"']
+            if len(qpos) % 2 != 0:
+                # Odd number of " -- there's a problem on this line
+                # Find the first and last " and assume those are the boundaries
+                # of the outer string(s), then escape inner ones
+                result = list(line)
+                i = 0
+                in_string = False
+                while i < len(result):
+                    c = result[i]
+                    if c == '"':
+                        if not in_string:
+                            in_string = True
+                        else:
+                            # Check if escaped
+                            if i > 0 and result[i-1] == '\\':
+                                i += 1
+                                continue
+                            # Could be end of string or inner quote
+                            next_non_space = None
+                            for k in range(i+1, len(result)):
+                                if result[k] not in (' ', '\t'):
+                                    next_non_space = result[k]
+                                    break
+                            if next_non_space in (',', ')', ';', ' ', '\t', '\n', None, '+'):
+                                in_string = False
+                            else:
+                                # Inner quote -- escape it
+                                result[i] = '\\"'
+                    i += 1
+                fixed.append(''.join(result))
+            else:
+                # Even quotes -- check each pair for unescaped inner quotes
+                result = list(line)
+                i = 0
+                while i < len(result):
+                    if result[i] == '"':
+                        start = i
+                        i += 1
+                        while i < len(result):
+                            if result[i] == '\\':
+                                i += 2
+                                continue
+                            if result[i] == '"':
+                                # Properly closed string from start to i
+                                # Check content for unescaped quotes
+                                content_start = start + 1
+                                content_end = i
+                                j = content_start
+                                while j < content_end:
+                                    if result[j] == '"' and (j == content_start or result[j-1] != '\\'):
+                                        result[j] = '\\"'
+                                        content_end = content_end + 1
+                                        j = j + 2
+                                    else:
+                                        j += 1
+                                i += 1
+                                break
+                            i += 1
+                    else:
+                        i += 1
+                fixed.append(''.join(result))
+        return "\n".join(fixed)
+
+    @staticmethod
     def _deduplicate_java_methods(code: str) -> str:
         """Remove duplicate Java method declarations from generated test code.
 
@@ -3645,6 +3728,16 @@ class FunctionalTestPipelineService:
         return self._runner_from_command("SCHEMATHESIS", result)
 
     async def _run_selenium(self, test_dir: Path, profile: Dict[str, Any]) -> Dict[str, Any]:
+        test_dir = Path(test_dir)
+        logger.info("[SELENIUM] test_dir=%s  exists=%s", test_dir, test_dir.exists())
+        pom = test_dir / "pom.xml"
+        logger.info("[SELENIUM] pom.xml exists=%s", pom.exists())
+        java_test = test_dir / "src" / "test" / "java" / "GeneratedSeleniumFunctionalTest.java"
+        logger.info("[SELENIUM] test Java file exists=%s", java_test.exists())
+
+        if not test_dir.exists() or not pom.exists():
+            return self._runner_skip("SELENIUM", "Selenium test directory or pom.xml was not generated.")
+
         container = shutil.which("docker") or shutil.which("podman")
         docker_running = False
         if container:
@@ -3657,8 +3750,12 @@ class FunctionalTestPipelineService:
             except Exception:
                 pass
 
-        mvn = shutil.which("mvn") or shutil.which("mvn.cmd")
-        
+        logger.info("[SELENIUM] container=%s docker_running=%s", container, docker_running)
+
+        # Try to find Maven via multiple methods
+        mvn = self._find_maven(test_dir)
+        logger.info("[SELENIUM] mvn=%s", mvn)
+
         if container and docker_running:
             selenium_port = self.find_available_port()
             container_id = ""
@@ -3732,7 +3829,10 @@ class FunctionalTestPipelineService:
         if os.name == "nt":
             test_cmd = _wrap_windows_script(test_cmd)
             
+        logger.info("[SELENIUM] Running: %s  cwd=%s  env.BASE_URL=%s", test_cmd, test_dir, env.get("BASE_URL"))
         result = await self._run_command(test_cmd, cwd=test_dir, timeout_sec=self.runner_timeout_sec, tool="SELENIUM", extra_env=env)
+        logger.info("[SELENIUM] exit_code=%s tests_run=%s output_tail=%s",
+            result.get("exit_code"), result.get("tests_run"), result.get("output_tail", "")[-200:])
         runner = self._runner_from_command("SELENIUM", result)
 
         # ── Auto-fix compilation errors and retry once ──
@@ -3742,6 +3842,7 @@ class FunctionalTestPipelineService:
             if fixed:
                 logger.info("Auto-fixed Selenium compilation error — retrying Maven build")
                 result = await self._run_command(test_cmd, cwd=test_dir, timeout_sec=self.runner_timeout_sec, tool="SELENIUM", extra_env=env)
+                logger.info("[SELENIUM] Retry exit_code=%s tests_run=%s", result.get("exit_code"), result.get("tests_run"))
                 runner = self._runner_from_command("SELENIUM", result)
 
         # ── Generate Allure report (preferred) with surefire fallback ──
@@ -3788,6 +3889,73 @@ class FunctionalTestPipelineService:
                 logger.info("Official Maven surefire report copied to %s", report_dir / "surefire-report.html")
         except Exception as exc:
             logger.warning("Failed to generate official surefire report: %s", exc)
+
+    def _find_maven(self, test_dir: Path) -> Optional[str]:
+        """Locate Maven executable via multiple strategies.
+
+        Priority:
+          1. Maven Wrapper (mvnw.cmd / mvnw) in the project root
+          2. shutil.which("mvn") / shutil.which("mvn.cmd")
+          3. Manual PATH scan
+          4. Maven Wrapper distribution in ~/.m2/wrapper/dists/
+        """
+        # Derive project root from test_dir: root/.functional_tests/selenium
+        root = test_dir.parent.parent
+        project_root = root if (root / "pom.xml").exists() else None
+        if not project_root:
+            for parent in test_dir.parents:
+                if (parent / "pom.xml").exists():
+                    project_root = parent
+                    break
+
+        # 1. Maven Wrapper in project root
+        if project_root:
+            if os.name == "nt":
+                for wrapper in ("mvnw.cmd", "mvnw.bat"):
+                    p = project_root / wrapper
+                    if p.exists():
+                        logger.info("[_find_maven] Using Maven Wrapper: %s", p)
+                        return str(p.resolve())
+            p = project_root / "mvnw"
+            if p.exists():
+                logger.info("[_find_maven] Using Maven Wrapper: %s", p)
+                return str(p.resolve())
+
+        # 2. shutil.which
+        mvn = shutil.which("mvn") or shutil.which("mvn.cmd")
+        if mvn:
+            return mvn
+
+        # 3. Manual PATH scan
+        if os.name == "nt":
+            for candidate in ["mvn.cmd", "mvn.bat", "mvn"]:
+                found = shutil.which(candidate)
+                if found:
+                    return found
+
+        for dir_candidate in os.environ.get("PATH", "").split(os.pathsep):
+            for exe in ["mvn.cmd", "mvn.bat", "mvn"] if os.name == "nt" else ["mvn"]:
+                p = Path(dir_candidate) / exe
+                if p.exists():
+                    return str(p.resolve())
+
+        # 4. Maven Wrapper distribution in ~/.m2/wrapper/dists/
+        # Structure: .m2/wrapper/dists/<dist-name>/<hash>/<extracted-dir>/bin/mvn.cmd
+        m2_wrapper = Path.home() / ".m2" / "wrapper" / "dists"
+        if m2_wrapper.exists():
+            for dist_dir in m2_wrapper.iterdir():
+                for hash_dir in dist_dir.iterdir():
+                    for extracted_dir in hash_dir.iterdir():
+                        bin_dir = extracted_dir / "bin"
+                        if bin_dir.exists():
+                            for exe in ["mvn.cmd", "mvn.bat", "mvn"] if os.name == "nt" else ["mvn"]:
+                                p = bin_dir / exe
+                                if p.exists():
+                                    logger.info("[_find_maven] Found Maven in .m2/wrapper/dists: %s", p)
+                                    return str(p.resolve())
+
+        logger.warning("[_find_maven] Maven not found via any strategy")
+        return None
 
     async def _generate_allure_report(self, test_dir: Path, mvn: str, env: Dict[str, str]) -> bool:
         """Run mvn allure:report to produce the Allure interactive HTML report.
@@ -3846,8 +4014,43 @@ class FunctionalTestPipelineService:
                 )
                 return False
         except Exception as exc:
-            logger.warning("Failed to generate Allure report: %s", exc)
-            return False
+            logger.warning("Failed to generate Allure report via mvn: %s", exc)
+
+        # Fallback: try Allure CLI directly if installed
+        try:
+            allure_cli = shutil.which("allure")
+            if not allure_cli:
+                allure_cli = shutil.which("allure.bat")
+            if not allure_cli and os.name == "nt":
+                for candidate in ["allure.cmd", "allure.bat", "allure.exe"]:
+                    allure_cli = shutil.which(candidate)
+                    if allure_cli:
+                        break
+
+            if allure_cli:
+                logger.info("[ALLURE] Trying Allure CLI at: %s", allure_cli)
+                cli_cmd = [allure_cli, "generate", str(allure_results), "-o", str(test_dir / "target" / "allure-report"), "--clean"]
+                if os.name == "nt":
+                    cli_cmd = _wrap_windows_script(cli_cmd)
+                cli_result = await self._run_command(
+                    cli_cmd, cwd=test_dir, timeout_sec=120,
+                    tool="ALLURE_CLI", extra_env=merged_env,
+                )
+                allure_site = test_dir / "target" / "allure-report"
+                if allure_site.exists() and (allure_site / "index.html").exists():
+                    report_dir = test_dir / "reports"
+                    report_dir.mkdir(parents=True, exist_ok=True)
+                    import shutil as _shutil
+                    dest = report_dir / "allure-report"
+                    if dest.exists():
+                        _shutil.rmtree(dest, ignore_errors=True)
+                    _shutil.copytree(allure_site, dest)
+                    logger.info("✅ Allure report generated via CLI at %s", dest / "index.html")
+                    return True
+        except Exception as exc2:
+            logger.warning("Failed to generate Allure report via CLI: %s", exc2)
+
+        return False
 
     def _auto_fix_selenium_compile_error(self, test_dir: Path, output: str) -> bool:
         """Attempt to auto-fix common Selenium Java compilation errors.
@@ -3878,6 +4081,14 @@ class FunctionalTestPipelineService:
             code = self._fix_java_class_name(code, "GeneratedSeleniumFunctionalTest")
             if code != original:
                 fixed = True
+
+        # Fix 3: Unescaped double quotes in string literals causing ')' expected errors
+        if "')' or ',' expected" in output or "';' expected" in output:
+            new_code = self._fix_unescaped_java_quotes(code)
+            if new_code != code:
+                code = new_code
+                fixed = True
+                logger.info("Fixed unescaped quotes in Selenium test")
 
         if fixed:
             try:
@@ -4568,8 +4779,42 @@ class FunctionalTestPipelineService:
         )
 
     def _get_maven_env(self) -> Dict[str, str]:
-        """Return env vars for Maven subprocesses (MAVEN_OPTS with proxy + wagon)."""
-        return {"MAVEN_OPTS": self._get_maven_opts()}
+        """Return env vars for Maven subprocesses (MAVEN_OPTS + JAVA_HOME detection)."""
+        env = {"MAVEN_OPTS": self._get_maven_opts()}
+        if "JAVA_HOME" not in os.environ:
+            java_home = self._detect_java_home()
+            if java_home:
+                env["JAVA_HOME"] = java_home
+                logger.info("[_get_maven_env] Auto-detected JAVA_HOME=%s", java_home)
+        return env
+
+    def _detect_java_home(self) -> Optional[str]:
+        """Attempt to locate JAVA_HOME from the java executable on PATH."""
+        try:
+            java_exe = shutil.which("java")
+            if java_exe:
+                resolved = Path(java_exe).resolve()
+                # <java_home>/bin/java.exe
+                if resolved.name.lower() in ("java", "java.exe") and resolved.parent.name.lower() == "bin":
+                    return str(resolved.parent.parent)
+            # Fallback: common JDK install locations
+            if os.name == "nt":
+                jdks = Path.home() / ".jdks"
+                if jdks.exists():
+                    for d in sorted(jdks.iterdir(), reverse=True):
+                        bin_java = d / "bin" / "java.exe"
+                        if bin_java.exists():
+                            return str(d.resolve())
+                # Program Files
+                for root in ("C:\\Program Files\\Java", "C:\\Program Files\\Microsoft\\jdk"):
+                    if Path(root).exists():
+                        for d in sorted(Path(root).iterdir(), reverse=True):
+                            bin_java = d / "bin" / "java.exe"
+                            if bin_java.exists():
+                                return str(d.resolve())
+        except Exception as exc:
+            logger.debug("[_detect_java_home] Error: %s", exc)
+        return None
 
     def _get_npm_proxy_env(self) -> Dict[str, str]:
         """Return env vars for npm/npx subprocesses behind Ford proxy."""
@@ -6401,6 +6646,8 @@ export default defineConfig({
             sb.append('            driver = new org.openqa.selenium.chrome.ChromeDriver(options);')
             sb.append('        }')
             sb.append('        try {')
+            sb.append('            WebElement field = null;')
+            sb.append('            WebElement btn = null;')
             
             if "actions" in test and isinstance(test["actions"], list) and len(test["actions"]) > 0:
                 for action in test["actions"]:
@@ -6420,42 +6667,50 @@ export default defineConfig({
                         loc = action.get("locator", "")
                         val = action.get("value", "")
                         by_str = self._selenium_by_locator(loc)
-                        sb.append(f'            Allure.step("Fill field: {loc}");')
-                        sb.append(f'            WebElement field = driver.findElement({by_str});')
-                        sb.append(f'            assertNotNull(field, "Form field should exist: {loc}");')
+                        loc_escaped = loc.replace('"', '\\"')
+                        val_escaped = val.replace('"', '\\"')
+                        sb.append(f'            Allure.step("Fill field: {loc_escaped}");')
+                        sb.append(f'            field = driver.findElement({by_str});')
+                        sb.append(f'            assertNotNull(field, "Form field should exist: {loc_escaped}");')
                         sb.append(f'            field.clear();')
-                        sb.append(f'            field.sendKeys("{val}");')
+                        sb.append(f'            field.sendKeys("{val_escaped}");')
                     elif act_type == "click":
                         loc = action.get("locator", "")
                         by_str = self._selenium_by_locator(loc)
-                        sb.append(f'            Allure.step("Click element: {loc}");')
-                        sb.append(f'            WebElement btn = driver.findElement({by_str});')
-                        sb.append(f'            assertNotNull(btn, "Clickable element should exist: {loc}");')
+                        loc_escaped = loc.replace('"', '\\"')
+                        sb.append(f'            Allure.step("Click element: {loc_escaped}");')
+                        sb.append(f'            btn = driver.findElement({by_str});')
+                        sb.append(f'            assertNotNull(btn, "Clickable element should exist: {loc_escaped}");')
                         sb.append(f'            btn.click();')
                     elif act_type == "assert_visible":
                         text = action.get("text")
                         loc = action.get("locator")
                         if loc:
                             by_str = self._selenium_by_locator(loc)
-                            sb.append(f'            Allure.step("Assert element visible: {loc}");')
-                            sb.append(f'            assertNotNull(driver.findElement({by_str}), "Element should be visible: {loc}");')
+                            loc_escaped = loc.replace('"', '\\"')
+                            sb.append(f'            Allure.step("Assert element visible: {loc_escaped}");')
+                            sb.append(f'            assertNotNull(driver.findElement({by_str}), "Element should be visible: {loc_escaped}");')
                         elif text:
-                            sb.append(f'            Allure.step("Assert text visible: {text}");')
-                            sb.append(f'            assertTrue(driver.getPageSource().contains("{text}"), "Expected text on page: {text}");')
+                            text_escaped = text.replace('"', '\\"')
+                            sb.append(f'            Allure.step("Assert text visible: {text_escaped}");')
+                            sb.append(f'            assertTrue(driver.getPageSource().contains("{text_escaped}"), "Expected text on page: {text_escaped}");')
                     elif act_type == "assert_not_visible":
                         text = action.get("text")
                         loc = action.get("locator")
                         if loc:
                             by_str = self._selenium_by_locator(loc)
-                            sb.append(f'            Allure.step("Assert element not visible: {loc}");')
-                            sb.append(f'            try {{ driver.findElement({by_str}); fail("Element should not be visible: {loc}"); }} catch (Exception ignored) {{}}')
+                            loc_escaped = loc.replace('"', '\\"')
+                            sb.append(f'            Allure.step("Assert element not visible: {loc_escaped}");')
+                            sb.append(f'            try {{ driver.findElement({by_str}); fail("Element should not be visible: {loc_escaped}"); }} catch (Exception ignored) {{}}')
                         elif text:
-                            sb.append(f'            Allure.step("Assert text not visible: {text}");')
-                            sb.append(f'            assertFalse(driver.getPageSource().contains("{text}"), "Text should not appear: {text}");')
+                            text_escaped = text.replace('"', '\\"')
+                            sb.append(f'            Allure.step("Assert text not visible: {text_escaped}");')
+                            sb.append(f'            assertFalse(driver.getPageSource().contains("{text_escaped}"), "Text should not appear: {text_escaped}");')
                     elif act_type == "assert_url":
                         val = action.get("value", "")
-                        sb.append(f'            Allure.step("Assert URL contains: {val}");')
-                        sb.append(f'            assertTrue(driver.getCurrentUrl().contains("{val}"), "URL should contain: {val}");')
+                        val_escaped = val.replace('"', '\\"')
+                        sb.append(f'            Allure.step("Assert URL contains: {val_escaped}");')
+                        sb.append(f'            assertTrue(driver.getCurrentUrl().contains("{val_escaped}"), "URL should contain: {val_escaped}");')
             else:
                 # Enhanced fallback: generate meaningful assertions based on route/source context
                 sb.append(f'            Allure.step("Navigate to {route}");')
@@ -6592,7 +6847,7 @@ class GeneratedSeleniumFunctionalTest {{
       <plugin>
         <groupId>io.qameta.allure</groupId>
         <artifactId>allure-maven</artifactId>
-        <version>2.13.0</version>
+        <version>2.14.0</version>
         <configuration>
           <reportVersion>${allure.version}</reportVersion>
         </configuration>

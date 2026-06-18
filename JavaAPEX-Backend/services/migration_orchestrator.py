@@ -99,9 +99,8 @@ class MigrationOrchestrator:
             try:
                 await self.run_core_phase(job_id, request)
                 self._ensure_not_cancelled(job_id)
-                if request.run_tests:
-                    await self.run_test_phase(job_id, request)
-                    self._ensure_not_cancelled(job_id)
+                await self.run_test_phase(job_id, request)
+                self._ensure_not_cancelled(job_id)
                 await self.run_scan_and_finalize_phase(job_id, request)
                 logger.info("Migration orchestration completed successfully")
             except MigrationCancelledError as exc:
@@ -529,9 +528,6 @@ class MigrationOrchestrator:
         request: MigrationRequest,
         clone_path: str,
     ) -> None:
-        if not request.run_tests:
-            return
-
         self._update_job_progress(
             job_id,
             job,

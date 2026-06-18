@@ -20,6 +20,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import subprocess
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -878,6 +880,25 @@ class LLMTestPipelineService:
 
         return {"ok": True, "stage": "pre_test_pom_validation", "errors": []}
 
+    def _detect_runtime_java_major_version(self) -> int:
+        try:
+            result = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=10)
+            output = (result.stderr or result.stdout or "").strip()
+            m = re.search(r'version\s+"(\d+)', output)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            pass
+        try:
+            v = os.environ.get("JAVA_HOME", "")
+            if v:
+                m = re.search(r'jdk[._-]?(\d+)', v, re.IGNORECASE)
+                if m:
+                    return int(m.group(1))
+        except Exception:
+            pass
+        return 17
+
     def _ensure_jacoco_maven(self, project_path: str, target_java_version: str = "17") -> Dict[str, Any]:
         pom_path = Path(project_path) / "pom.xml"
         if not pom_path.exists():
@@ -890,19 +911,31 @@ class LLMTestPipelineService:
         original_pom = pom
         updated_dependencies: List[Dict[str, Any]] = []
         
-        logger.info(f"_ensure_jacoco_maven: Configuring Maven for project_path={project_path}, target_java_version={target_java_version}")
+        runtime_java = self._detect_runtime_java_major_version()
+        try:
+            target_v = int(target_java_version)
+        except (ValueError, TypeError):
+            target_v = runtime_java
+        effective_v = min(target_v, runtime_java)
+        effective_java_version = str(effective_v)
+        if effective_v != target_v:
+            logger.warning(
+                "Target Java version %s not available (runtime=%s). Using %s instead.",
+                target_java_version, runtime_java, effective_java_version
+            )
+
+        logger.info(f"_ensure_jacoco_maven: Configuring Maven for project_path={project_path}, target_java_version={target_java_version}, effective={effective_java_version}, runtime_java={runtime_java}")
 
         # Dynamic Versions based on Java Target
-        target_v = int(target_java_version)
         jacoco_ver = LLM_TEST_JACOCO_PLUGIN_VERSION
         boot_parent_ver = LLM_TEST_SPRING_BOOT_PARENT_VERSION
         junit_ver = LLM_TEST_JUNIT5_VERSION
 
-        if target_v >= 21:
+        if effective_v >= 21:
             jacoco_ver = "0.8.11"
             boot_parent_ver = "3.2.5"
             junit_ver = "5.10.2"
-        elif target_v >= 17:
+        elif effective_v >= 17:
             jacoco_ver = "0.8.8"
             boot_parent_ver = "3.0.0"
             junit_ver = "5.9.0"
@@ -934,7 +967,7 @@ class LLMTestPipelineService:
         # 1. Fix invalid Java version (hallucinated or inconsistent versions)
         pom = re.sub(
             r"<java\.version>.*?</java\.version>",
-            f"<java.version>{target_java_version}</java.version>",
+            f"<java.version>{effective_java_version}</java.version>",
             pom,
         )
 
@@ -969,9 +1002,9 @@ class LLMTestPipelineService:
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <source>{target_java_version}</source>
-                    <target>{target_java_version}</target>
-                    <release>{target_java_version}</release>
+                    <source>{effective_java_version}</source>
+                    <target>{effective_java_version}</target>
+                    <release>{effective_java_version}</release>
                 </configuration>
             </plugin>"""
 

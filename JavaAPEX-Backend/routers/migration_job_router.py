@@ -173,6 +173,18 @@ def create_migration_job_router(
                 await refresh_job_fossa_report_if_needed(job)
             except Exception:
                 pass
+        if job.test_pipeline is None:
+            job.test_pipeline = TestPipelineReport(
+                provider="none",
+                project_kind="",
+                generated_tests_relative="",
+                test_strategy="none",
+                test_summary_metrics={},
+                runner={},
+                existing_test_files=[],
+                migrated_test_files=[],
+                generated_test_files=[],
+            )
         return job
 
     @router.post("/migration/{job_id}/cancel", response_model=MigrationResult)
@@ -306,6 +318,25 @@ def create_migration_job_router(
 
             if isinstance(pipeline, dict) and pipeline:
                 try:
+                    raw_metrics = pipeline.get("test_summary_metrics", {}) or {}
+                    safe_metrics = {
+                        "repo_total_files": int(raw_metrics.get("repo_total_files", 0) or 0),
+                        "existing_test_files": int(raw_metrics.get("existing_test_files", 0) or 0),
+                        "new_test_files": int(raw_metrics.get("new_test_files", 0) or 0),
+                        "existing_test_cases": int(raw_metrics.get("existing_test_cases", 0) or 0),
+                        "generated_test_cases": int(raw_metrics.get("generated_test_cases", 0) or 0),
+                        "total_test_cases": int(raw_metrics.get("total_test_cases", 0) or 0),
+                        "bl_suitability_score": float(raw_metrics.get("bl_suitability_score", 0.0) or 0.0),
+                        "java_migration_version": str(raw_metrics.get("java_migration_version", "") or ""),
+                    }
+                    if raw_metrics.get("functional_application_type"):
+                        safe_metrics["functional_application_type"] = raw_metrics["functional_application_type"]
+                    if raw_metrics.get("functional_recommended_tools"):
+                        safe_metrics["functional_recommended_tools"] = raw_metrics["functional_recommended_tools"]
+                    if raw_metrics.get("functional_generated_tests"):
+                        safe_metrics["functional_generated_tests"] = raw_metrics["functional_generated_tests"]
+                    if raw_metrics.get("functional_execution_status"):
+                        safe_metrics["functional_execution_status"] = raw_metrics["functional_execution_status"]
                     job.test_pipeline = TestPipelineReport(
                         provider=pipeline.get("provider", llm_provider),
                         project_kind=pipeline.get("project_kind", ""),
@@ -316,7 +347,7 @@ def create_migration_job_router(
                         existing_test_files=pipeline.get("existing_test_files", []) or [],
                         migrated_test_files=pipeline.get("migrated_test_files", []) or [],
                         generated_test_files=pipeline.get("generated_test_files", []) or [],
-                        test_summary_metrics=pipeline.get("test_summary_metrics", {}) or {},
+                        test_summary_metrics=safe_metrics,
                         runner=pipeline.get("runner", {}) or {},
                         functional_testing=pipeline.get("functional_testing") or test_result.get("functional_pipeline"),
                         manual_test_plan_path=pipeline.get("manual_test_plan_path"),
@@ -327,6 +358,27 @@ def create_migration_job_router(
                     )
                 except Exception as exc:
                     job_service.add_log(job_id, f"WARNING: Failed to map test pipeline report: {exc}")
+            elif not isinstance(pipeline, dict) or not pipeline:
+                if job.test_pipeline is None:
+                    job.test_pipeline = TestPipelineReport(
+                        provider="none",
+                        project_kind="",
+                        generated_tests_relative="",
+                        test_strategy="none",
+                        test_summary_metrics={
+                            "repo_total_files": 0,
+                            "existing_test_files": 0,
+                            "new_test_files": 0,
+                            "existing_test_cases": 0,
+                            "generated_test_cases": 0,
+                            "total_test_cases": 0,
+                            "bl_suitability_score": 0.0,
+                        },
+                        runner={},
+                        existing_test_files=[],
+                        migrated_test_files=[],
+                        generated_test_files=[],
+                    )
 
             try:
                 job.testcase_doc_path = None

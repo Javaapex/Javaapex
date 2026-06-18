@@ -751,6 +751,7 @@ def _wrap_windows_script(cmd: List[str]) -> List[str]:
     """
     On Windows, run .bat / .cmd / .ps1 wrappers through the correct shell.
     PowerShell wrappers are executed via powershell.exe -File.
+    Uses subprocess.list2cmdline to properly quote paths with spaces.
     """
     if os.name != "nt" or not cmd:
         return cmd

@@ -349,22 +349,13 @@ if celery_app is not None:
     def _run_migration_core_job_impl(self: Any, job_id: str, request_payload: dict[str, Any]) -> dict[str, Any]:
         async def _runner(orchestrator: Any, job_service: Any, request: MigrationRequest) -> dict[str, Any]:
             await orchestrator.run_core_phase(job_id, request)
-            if request.run_tests:
-                return _enqueue_follow_up_task(
-                    job_service,
-                    job_id=job_id,
-                    request_payload=request_payload,
-                    task_name=MIGRATION_TESTS_TASK_NAME,
-                    queue_name=CELERY_TASK_QUEUE_TESTS,
-                    current_step="Queued test stage for worker execution...",
-                )
             return _enqueue_follow_up_task(
                 job_service,
                 job_id=job_id,
                 request_payload=request_payload,
-                task_name=MIGRATION_SCANS_TASK_NAME,
-                queue_name=CELERY_TASK_QUEUE_SCANS,
-                current_step="Queued scan/finalization stage for worker execution...",
+                task_name=MIGRATION_TESTS_TASK_NAME,
+                queue_name=CELERY_TASK_QUEUE_TESTS,
+                current_step="Queued test stage for worker execution...",
             )
 
         return _run_worker_stage(

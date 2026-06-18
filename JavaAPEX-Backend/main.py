@@ -11099,10 +11099,14 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     alternatives: List[str] = []
     alternative_options: List[JavaVersionAlternativeOption] = []
 
-    if source_version >= 17:
+    if source_version >= 21:
+        recommended_target = "25"
+        confidence = "high"
+        rationale.append("Project is already on a modern Java baseline, so moving to Java 25 LTS is the best next step.")
+    elif source_version >= 17:
         recommended_target = "21"
         confidence = "high"
-        rationale.append("Project is already on a modern Java baseline, so moving to Java 25 (LTS) is the best next step.")
+        rationale.append("Java 21 is the next stable LTS target for projects already running on Java 17.")
     elif source_version >= 11:
         recommended_target = "17"
         confidence = "high"
@@ -11112,7 +11116,7 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
         rationale.append("Java 17 is the safest default LTS landing zone for legacy Java applications.")
 
     if risk_level in {"high", "critical"}:
-        safest_lts_target = first_higher_version(["17", "21"])
+        safest_lts_target = first_higher_version(["17", "21", "25"])
         if safest_lts_target:
             recommended_target = safest_lts_target
             confidence = "high"
@@ -11120,13 +11124,13 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
                 f"High-risk projects are best modernized toward the nearest higher LTS release, so Java {safest_lts_target} is recommended."
             )
     elif build_tool == "gradle" and source_version >= 17 and dependency_count <= 20 and endpoint_count <= 20:
-        recommended_target = "21"
+        recommended_target = first_higher_version(["21", "25"]) or recommended_target
         confidence = "high"
-        rationale.append("The project appears modern enough that Java 25 is a practical next-step LTS target.")
+        rationale.append("The project appears modern enough that a newer LTS target is a practical next step.")
 
     if spring_deps >= 3 and source_version >= 11 and risk_level not in {"high", "critical"}:
-        recommended_target = "21"
-        rationale.append("A Spring-heavy codebase with a reasonably modern baseline can benefit from targeting Java 25 LTS.")
+        recommended_target = first_higher_version(["17", "21", "25"]) or recommended_target
+        rationale.append("A Spring-heavy codebase with a reasonably modern baseline can benefit from targeting the next supported LTS release.")
 
     if legacy_deps >= 3:
         conservative_target = first_higher_version(["17", "21"])
@@ -11142,7 +11146,7 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     else:
         rationale.append("Limited test coverage suggests choosing a conservative LTS version first.")
 
-    ordered_alternative_candidates = next_higher_versions(["17", "21"])
+    ordered_alternative_candidates = next_higher_versions(["17", "21", "25"])
 
     for candidate in ordered_alternative_candidates:
         if candidate == recommended_target:

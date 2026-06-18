@@ -3736,7 +3736,7 @@ export default function MigrationWizard() {
         ltsJavaVersions.has(value)
     );
 
-    return orderedVersions
+    const cards = orderedVersions
       .map((version, index) => {
         const matchedVersion = availableTargetVersions.find((item) => item.value === version);
         if (!matchedVersion) {
@@ -3766,6 +3766,33 @@ export default function MigrationWizard() {
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    if (cards.length > 0) {
+      return cards;
+    }
+
+    const fallbackTarget =
+      availableTargetVersions.find((item) => ltsJavaVersions.has(item.value)) ||
+      availableTargetVersions[availableTargetVersions.length - 1];
+
+    if (!fallbackTarget) {
+      return [];
+    }
+
+    return [
+      {
+        version: fallbackTarget.value,
+        label: fallbackTarget.label,
+        eyebrow: "Recommended LTS",
+        description:
+          versionRecommendation.rationale.slice(0, 2).join(" ") ||
+          `Recommended upgrade path from Java ${selectedSourceVersion}.`,
+        helper: `Confidence: ${versionRecommendation.confidence}`,
+        badgeBackground: "#dcfce7",
+        badgeColor: "#15803d",
+        rank: 0,
+      },
+    ];
   }, [availableTargetVersions, selectedSourceVersion, versionRecommendation]);
 
   const categorizedStrategyDependencies = useMemo(() => categorizeDependencies(repoAnalysis?.dependencies || []), [repoAnalysis?.dependencies]);

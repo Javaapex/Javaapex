@@ -519,8 +519,23 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    def _is_auth_required_error(message: str) -> bool:
+        normalized = (message or "").lower()
+        auth_markers = (
+            "private repository",
+            "private or inaccessible",
+            "personal access token",
+            "repo scope",
+            "access denied",
+            "does not have access",
+            "not accessible with the provided github token",
+            "requires authentication",
+        )
+        return any(marker in normalized for marker in auth_markers)
+
     # --- Attempt 1: try with provided token or the server default token ---
     effective_token = token.strip() if token and token.strip() else DEFAULT_GITHUB_TOKEN
+    first_message = ""
     try:
         info = await github_service.get_repo_info(effective_token, owner, repo, repo_url)
         is_private = info.get("is_private", False)
@@ -540,6 +555,7 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
         logger.debug("Visibility check with token failed for %s/%s: %s", owner, repo, first_message)
 
     # --- Attempt 2: try anonymous (no token) — public repos are accessible without auth ---
+    anonymous_message = ""
     try:
         info = await github_service.get_repo_info("", owner, repo, repo_url)
         is_private = info.get("is_private", False)
@@ -555,13 +571,21 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
     except Exception:
         pass  # anonymous access also failed — repo is genuinely private or inaccessible
 
-    # --- Both attempts failed: repo is private or inaccessible ---
+    if _is_auth_required_error(first_message):
+        return {
+            "owner": owner,
+            "repo": repo,
+            "visibility": "private_or_inaccessible",
+            "requires_token": True,
+            "message": "Repository appears private or inaccessible. Provide a GitHub Personal Access Token with 'repo' scope.",
+        }
+
     return {
         "owner": owner,
         "repo": repo,
-        "visibility": "private_or_inaccessible",
-        "requires_token": True,
-        "message": "Repository appears private or inaccessible. Provide a GitHub Personal Access Token with 'repo' scope.",
+        "visibility": "unknown",
+        "requires_token": False,
+        "message": first_message or "Unable to verify repository visibility right now.",
     }
 
 @app.post("/api/github/generate-kt-document")
@@ -11075,10 +11099,14 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     alternatives: List[str] = []
     alternative_options: List[JavaVersionAlternativeOption] = []
 
-    if source_version >= 17:
+    if source_version >= 21:
+        recommended_target = "25"
+        confidence = "high"
+        rationale.append("Project is already on a modern Java baseline, so moving to Java 25 LTS is the best next step.")
+    elif source_version >= 17:
         recommended_target = "21"
         confidence = "high"
-        rationale.append("Project is already on a modern Java baseline, so moving to Java 25 (LTS) is the best next step.")
+        rationale.append("Java 21 is the next stable LTS target for projects already running on Java 17.")
     elif source_version >= 11:
         recommended_target = "17"
         confidence = "high"
@@ -11088,7 +11116,7 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
         rationale.append("Java 17 is the safest default LTS landing zone for legacy Java applications.")
 
     if risk_level in {"high", "critical"}:
-        safest_lts_target = first_higher_version(["17", "21"])
+        safest_lts_target = first_higher_version(["17", "21", "25"])
         if safest_lts_target:
             recommended_target = safest_lts_target
             confidence = "high"
@@ -11096,13 +11124,13 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
                 f"High-risk projects are best modernized toward the nearest higher LTS release, so Java {safest_lts_target} is recommended."
             )
     elif build_tool == "gradle" and source_version >= 17 and dependency_count <= 20 and endpoint_count <= 20:
-        recommended_target = "21"
+        recommended_target = first_higher_version(["21", "25"]) or recommended_target
         confidence = "high"
-        rationale.append("The project appears modern enough that Java 25 is a practical next-step LTS target.")
+        rationale.append("The project appears modern enough that a newer LTS target is a practical next step.")
 
     if spring_deps >= 3 and source_version >= 11 and risk_level not in {"high", "critical"}:
-        recommended_target = "21"
-        rationale.append("A Spring-heavy codebase with a reasonably modern baseline can benefit from targeting Java 25 LTS.")
+        recommended_target = first_higher_version(["17", "21", "25"]) or recommended_target
+        rationale.append("A Spring-heavy codebase with a reasonably modern baseline can benefit from targeting the next supported LTS release.")
 
     if legacy_deps >= 3:
         conservative_target = first_higher_version(["17", "21"])
@@ -11118,7 +11146,7 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     else:
         rationale.append("Limited test coverage suggests choosing a conservative LTS version first.")
 
-    ordered_alternative_candidates = next_higher_versions(["17", "21"])
+    ordered_alternative_candidates = next_higher_versions(["17", "21", "25"])
 
     for candidate in ordered_alternative_candidates:
         if candidate == recommended_target:

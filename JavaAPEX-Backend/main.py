@@ -11,6 +11,7 @@ import uuid
 import os
 import sys
 import re
+import json
 import html as _html
 import logging
 import shutil
@@ -150,6 +151,7 @@ from services.migration_orchestrator import MigrationOrchestrator
 from services.openai_recommendation_service import openai_recommendation_service
 from services.preferred_llm_service import preferred_llm_service
 from services.technical_document_llm_service import technical_document_llm_service
+from services.functional_test_pipeline import functional_test_pipeline
 from services.llm_context_service import build_repository_context_pack, context_pack_fingerprint
 from services.llm_cache_service import get_llm_cache_stats
 from services.llm_token_usage_service import llm_token_usage_service
@@ -791,6 +793,355 @@ async def _warm_brd_document_cache(repo_url: str, token: str = "", github_token:
         logger.info("[BRD PREFETCH] Technical document cache primed for %s/%s", owner, repo)
     except Exception:
         logger.exception("[BRD PREFETCH] Failed to pre-generate technical document for %s", repo_url)
+
+# ── Functional test scope: dynamic project-aware analysis ──
+
+def _build_dynamic_ui_test_row(
+    idx: int,
+    route_info: Dict[str, Any],
+    page_data: Dict[str, Dict[str, Any]],
+    tool_label: str,
+) -> str:
+    route = route_info["route"] if isinstance(route_info, dict) else route_info
+    source = route_info.get("source_file", "") if isinstance(route_info, dict) else ""
+    page_type = route_info.get("page_type", "page") if isinstance(route_info, dict) else "page"
+
+    pd: Dict[str, Any] = {}
+    if isinstance(route_info, dict) and route_info.get("component"):
+        comp = route_info["component"]
+        for pd_key, pd_val in page_data.items():
+            if pd_key.lower().startswith(comp.lower()) and pd_val:
+                pd = pd_val
+                break
+    if not pd and source and source in page_data:
+        pd = page_data[source]
+    if not pd:
+        for pd_key, pd_val in page_data.items():
+            if pd_val:
+                pd = pd_val
+                break
+
+    # Build project-aware test name
+    try:
+        test_name = functional_test_pipeline._build_smart_test_name(route, pd, tool_label)
+    except Exception:
+        test_name = _business_ui_test_name(route, pd)
+
+    # Build test steps from actual page data
+    try:
+        actions = functional_test_pipeline._build_actions_from_page_data(route, pd)
+    except Exception:
+        actions = []
+    steps_text = _escape_html("; ".join(
+        a.get("type", "") + (" " + (a.get("url") or a.get("locator") or a.get("text") or a.get("value", ""))) 
+        for a in actions[:5]
+    ))
+
+    has_forms = bool(pd.get("forms"))
+    has_tables = pd.get("has_tables", False)
+    has_links = bool(pd.get("links"))
+    interacts = "Yes" if has_forms or has_tables else "Page load only"
+
+    page_type_label = {
+        "spa_route": "SPA Page", "jsp": "JSP Page",
+        "html": "Static HTML", "template": "Template"
+    }.get(page_type, "UI Page")
+
+    fields_html = ""
+    if pd.get("forms"):
+        form = pd["forms"][0]
+        field_names = [f.get("name") or f.get("id") or "" for f in form.get("fields", []) if f.get("name") or f.get("id")]
+        if field_names:
+            fields_html = " | Fields: " + ", ".join(field_names[:4])
+        buttons = form.get("buttons", [])
+        if buttons:
+            fields_html += " | Actions: " + ", ".join(buttons[:3])
+
+    return f"""
+        <tr>
+            <td style="text-align:center;font-weight:600;color:#64748b;">{idx + 1}</td>
+            <td><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:12px;">{_escape_html(route)}</code></td>
+            <td>{_escape_html(page_type_label)}</td>
+            <td style="font-weight:500;color:#1e293b;">{_escape_html(test_name)}</td>
+            <td><span class="scope-badge scope-{'interact' if interacts == 'Yes' else 'view'}">{_escape_html(interacts)}</span></td>
+            <td style="font-size:11px;color:#64748b;max-width:250px;">{steps_text[:120]}</td>
+        </tr>"""
+
+
+def _build_dynamic_api_test_row(idx: int, ep: Dict[str, Any]) -> str:
+    method = ep.get("method", "GET").upper()
+    path = ep.get("path", "/")
+    controller = ep.get("controller", "")
+    source = ep.get("source_file", "")
+
+    # Build project-aware API test name
+    resource = "resource"
+    path_parts = [p for p in path.split("/") if p and not p.startswith("{") and not p.startswith(":")]
+    if path_parts:
+        resource = path_parts[-1]
+    controller_hint = controller.replace("Controller", "") if controller else resource
+
+    method_test_map = {
+        "GET": f"Verify the {controller_hint} retrieval endpoint returns all records with correct pagination and sorting",
+        "POST": f"Validate that a new {controller_hint} can be created with valid payload and returns 201 Created",
+        "PUT": f"Ensure existing {controller_hint} record can be fully updated and changes are persisted",
+        "PATCH": f"Confirm partial updates to {controller_hint} fields apply correctly without side effects",
+        "DELETE": f"Verify {controller_hint} record removal works and cascading constraints are handled",
+    }
+    business_name = method_test_map.get(method, f"Execute {method} operation on {controller_hint}")
+
+    # Build validation assertions based on method
+    method_validations = {
+        "GET": "Assert 200 OK, validate response JSON schema, check required fields exist",
+        "POST": "Assert 201 Created, validate Location header, confirm resource returned in body",
+        "PUT": "Assert 200 OK, verify all updated fields match request payload",
+        "PATCH": "Assert 200 OK, confirm only specified fields were modified",
+        "DELETE": "Assert 204 No Content, verify resource no longer accessible via GET",
+    }
+    validation = method_validations.get(method, "Assert appropriate HTTP status code and response body")
+
+    method_colors = {"GET": "#2563eb", "POST": "#16a34a", "PUT": "#f59e0b", "PATCH": "#8b5cf6", "DELETE": "#ef4444"}
+
+    return f"""
+        <tr>
+            <td style="text-align:center;font-weight:600;color:#64748b;">{idx + 1}</td>
+            <td><span class="method-badge" style="background:{method_colors.get(method,'#64748b')};color:#fff;font-weight:700;padding:3px 10px;border-radius:6px;font-size:11px;">{_escape_html(method)}</span></td>
+            <td><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:12px;">{_escape_html(path)}</code></td>
+            <td style="font-weight:500;color:#1e293b;">{_escape_html(business_name)}</td>
+            <td style="font-size:11px;color:#64748b;max-width:220px;">{_escape_html(validation)}</td>
+            <td style="font-size:12px;color:#64748b;">{_escape_html(controller or source or '—')}</td>
+        </tr>"""
+
+
+async def _analyze_project_for_functional_tests(
+    repo_url: str,
+    token: str = "",
+) -> Dict[str, Any]:
+    logger.info("[FUNCTIONAL TEST SCOPE] Analyzing project %s for dynamic test case generation", repo_url)
+    workspace = await github_clone_analysis_service.prepare_workspace(
+        repo_reference=repo_url, token=token, force_refresh=False
+    )
+    root = Path(workspace.workspace_path)
+    files = functional_test_pipeline._collect_files(root)
+    endpoints = functional_test_pipeline._detect_endpoints(files)
+    ui_routes = functional_test_pipeline._detect_ui_routes(files)
+    page_data = functional_test_pipeline._extract_all_page_data(root)
+    profile = functional_test_pipeline.build_application_profile(root)
+
+    return {
+        "endpoints": endpoints or [],
+        "ui_routes": ui_routes or [],
+        "page_data": page_data or {},
+        "application_type": profile.get("applicationType", "UNKNOWN"),
+        "recommended_tools": profile.get("recommendedFunctionalTools", []),
+        "framework_signals": profile.get("frameworkSignals", {}),
+        "has_ui": bool(ui_routes),
+        "has_api": bool(endpoints),
+    }
+
+
+async def _llm_enhance_functional_test_scope(
+    project_name: str,
+    endpoints: List[Dict[str, Any]],
+    ui_routes: List[Dict[str, Any]],
+    page_data: Dict[str, Dict[str, Any]],
+    analysis: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not endpoints and not ui_routes:
+        logger.info("[FUNCTIONAL TEST SCOPE] No endpoints/routes to enhance with LLM; skipping")
+        return {"ui_insights": [], "api_insights": []}
+
+    try:
+        ui_context = []
+        for r in ui_routes[:10]:
+            route = r if isinstance(r, str) else r.get("route", "")
+            src = r.get("source_file", "") if isinstance(r, dict) else ""
+            pd = page_data.get(src, {})
+            headings = pd.get("headings", [])
+            forms = pd.get("forms", [])
+            has_tables = pd.get("has_tables", False)
+            fields_summary = []
+            for f in forms[:2]:
+                for field in f.get("fields", [])[:3]:
+                    fields_summary.append(field.get("name", "") or field.get("id", "") or "field")
+            ui_context.append({
+                "route": route,
+                "source": src,
+                "headings": headings[:3],
+                "fields": fields_summary[:3],
+                "has_forms": bool(forms),
+                "has_tables": has_tables,
+            })
+
+        api_context = [{
+            "method": e.get("method", "GET"),
+            "path": e.get("path", "/"),
+            "controller": e.get("controller", ""),
+        } for e in endpoints[:15]]
+
+        if not ui_context and not api_context:
+            return {"ui_insights": [], "api_insights": []}
+
+        system_prompt = (
+            "You are a QA test planning expert. Given project analysis data, "
+            "generate specific, realistic functional test scenarios for the application. "
+            "Return a JSON object with 'ui_insights' and 'api_insights' arrays."
+        )
+
+        user_prompt = (
+            f"Project: {project_name}\n"
+            f"Application Type: {analysis.get('application_type', 'Unknown')}\n"
+            f"Frameworks: {json.dumps(analysis.get('framework_signals', {}))}\n\n"
+        )
+
+        if ui_context:
+            user_prompt += (
+                f"UI Pages ({len(ui_context)}):\n"
+                f"{json.dumps(ui_context, indent=2)}\n\n"
+                "For each UI page, generate a business-focused test scenario description "
+                "that tests the actual page functionality (forms, tables, navigation). "
+                "Include in 'ui_insights' array: [{\"route\": \"...\", \"test_scenario\": \"...\", \"test_steps\": [\"...\"]}]\n\n"
+            )
+
+        if api_context:
+            user_prompt += (
+                f"API Endpoints ({len(api_context)}):\n"
+                f"{json.dumps(api_context, indent=2)}\n\n"
+                "For each API endpoint, generate a business-focused test scenario description "
+                "with specific validation assertions. "
+                "Include in 'api_insights' array: [{\"method\": \"...\", \"path\": \"...\", \"test_scenario\": \"...\", \"assertions\": [\"...\"]}]\n\n"
+            )
+
+        user_prompt += (
+            'Respond with a JSON object like: {"ui_insights": [...], "api_insights": [...]}. '
+            "Use empty arrays if no data for a category."
+        )
+
+        result = await preferred_llm_service.request_json_groq(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=3000,
+            temperature=0.3,
+            json_mode=True,
+            cache_key=f"functional_test_llm_{project_name}_{hash(json.dumps(ui_context, sort_keys=True)[:200])}",
+        )
+
+        text = (result or {}).get("text", "")
+        if not text:
+            return {"ui_insights": [], "api_insights": []}
+
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").strip()
+            if stripped.lower().startswith("json"):
+                stripped = stripped[4:].strip()
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            return {
+                "ui_insights": parsed.get("ui_insights") or parsed.get("uiInsights") or [],
+                "api_insights": parsed.get("api_insights") or parsed.get("apiInsights") or [],
+            }
+        return {"ui_insights": [], "api_insights": []}
+
+    except Exception as exc:
+        logger.warning("[FUNCTIONAL TEST SCOPE] LLM enhancement failed (non-fatal): %s", exc)
+        return {"ui_insights": [], "api_insights": []}
+
+
+@app.post("/api/functional-test-scope/preview")
+async def preview_functional_test_scope(request: dict):
+    """
+    Preview the functional test scope documents for business users.
+
+    When repo_url is provided, performs dynamic project analysis to generate
+    customized, project-specific test cases. Falls back to provided data otherwise.
+    """
+    try:
+        project_name = (request or {}).get("project_name", "Project")
+        repo_url = (request or {}).get("repo_url", "")
+        token = (request or {}).get("token", "")
+
+        # ── Dynamic project analysis when repo_url is given ──
+        if repo_url:
+            try:
+                analysis = await _analyze_project_for_functional_tests(repo_url, token)
+                endpoints = analysis["endpoints"]
+                ui_routes = analysis["ui_routes"]
+                page_data = analysis["page_data"]
+                recommended_tools = analysis.get("recommended_tools", [])
+                application_type = analysis.get("application_type", "")
+
+                # Merge selected_tools from request with recommended tools
+                selected_tools = (request or {}).get("selected_tools", [])
+                if not selected_tools and recommended_tools:
+                    selected_tools = recommended_tools
+
+                logger.info(
+                    "[FUNCTIONAL TEST SCOPE] Dynamic analysis complete: %d endpoints, %d UI routes, %d pages with data",
+                    len(endpoints), len(ui_routes), len(page_data),
+                )
+
+                # LLM enrichment
+                llm_insights = await _llm_enhance_functional_test_scope(
+                    project_name, endpoints, ui_routes, page_data, analysis,
+                )
+            except Exception as analysis_error:
+                logger.warning(
+                    "[FUNCTIONAL TEST SCOPE] Dynamic analysis failed, falling back to provided data: %s",
+                    analysis_error,
+                )
+                endpoints = (request or {}).get("endpoints", [])
+                ui_routes = (request or {}).get("uiRoutes", [])
+                page_data = (request or {}).get("page_data", {})
+                selected_tools = (request or {}).get("selected_tools", [])
+                llm_insights = {"ui_insights": [], "api_insights": []}
+                application_type = ""
+        else:
+            endpoints = (request or {}).get("endpoints", [])
+            ui_routes = (request or {}).get("uiRoutes", [])
+            page_data = (request or {}).get("page_data", {})
+            selected_tools = (request or {}).get("selected_tools", [])
+            llm_insights = {"ui_insights": [], "api_insights": []}
+            application_type = ""
+
+        # Validate inputs
+        if not isinstance(endpoints, list):
+            endpoints = []
+        if not isinstance(ui_routes, list):
+            ui_routes = []
+        if not isinstance(page_data, dict):
+            page_data = {}
+        if not isinstance(selected_tools, list):
+            selected_tools = []
+
+        ui_html = generate_ui_test_scope_html(
+            endpoints=endpoints,
+            ui_routes=ui_routes,
+            page_data=page_data,
+            project_name=project_name,
+            selected_tools=selected_tools,
+            llm_insights=llm_insights.get("ui_insights", []),
+            application_type=application_type,
+        )
+
+        api_html = generate_api_test_scope_html(
+            endpoints=endpoints,
+            project_name=project_name,
+            selected_tools=selected_tools,
+            llm_insights=llm_insights.get("api_insights", []),
+            application_type=application_type,
+        )
+
+        return {
+            "uiScopeHtml": ui_html,
+            "apiScopeHtml": api_html,
+            "uiTestCount": len(ui_routes[:30]),
+            "apiTestCount": len(endpoints[:50]),
+        }
+
+    except Exception as exc:
+        logger.exception("[FUNCTIONAL TEST SCOPE] Failed to generate preview")
+        raise HTTPException(status_code=500, detail=f"Failed to generate test scope: {exc}")
 
 @app.get("/api/github/analyze-url")
 async def analyze_repo_url(
@@ -10497,6 +10848,454 @@ def generate_simple_html_report(job: MigrationResult, logs: List[str]) -> str:
 """
 
     return html
+
+
+def _escape_html(text: Any) -> str:
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+
+def _business_ui_test_name(route: str, page_data: Optional[Dict[str, Any]]) -> str:
+    """Generate a business-friendly test case name from route and page data."""
+    if not page_data:
+        if route == "/":
+            return "Verify application home page loads successfully"
+        return f"Verify page at {route} renders correctly"
+
+    headings = page_data.get("headings", [])
+    forms = page_data.get("forms", [])
+    has_tables = page_data.get("has_tables", False)
+
+    # Build description from page content
+    parts = []
+    if headings:
+        parts.append(f"Verify \"{headings[0]}\" section is displayed")
+    if forms:
+        fields = forms[0].get("fields", [])
+        buttons = forms[0].get("buttons", [])
+        field_labels = []
+        for f in fields:
+            fn = f.get("name", "") or f.get("id", "") or f.get("placeholder", "")
+            ft = f.get("type", "text")
+            if ft == "password":
+                field_labels.append("password")
+            elif ft == "email":
+                field_labels.append("email address")
+            elif fn:
+                field_labels.append(fn.replace("_", " ").replace("-", " "))
+        if field_labels:
+            parts.append(f"fill in {', '.join(field_labels[:3])}")
+        if buttons:
+            parts.append(f"submit using \"{buttons[0]}\" button")
+        parts.append("validate no server errors occur")
+    if has_tables:
+        headers = page_data.get("table_headers", [])
+        if headers:
+            parts.append(f"verify data table with {', '.join(h[:20] for h in headers[:3])} columns")
+        else:
+            parts.append("verify data table is populated")
+    if not parts:
+        return f"Verify {route} page functions correctly"
+    return "; ".join(parts)
+
+
+def _business_api_test_name(endpoint: Dict[str, Any]) -> str:
+    """Generate a business-friendly test case name from endpoint data."""
+    method = endpoint.get("method", "GET").upper()
+    path = endpoint.get("path", "/")
+    controller = endpoint.get("controller", "")
+    desc = endpoint.get("description", "")
+
+    # Convert path to business description
+    path_parts = [p for p in path.split("/") if p and not p.startswith("{") and not p.startswith(":")]
+    resource = path_parts[-1] if path_parts else "resource"
+
+    if method == "GET":
+        if path.endswith("}") or "id" in path.lower():
+            return f"Retrieve specific {resource} details"
+        return f"Fetch list of {resource}"
+    elif method == "POST":
+        return f"Create a new {resource}"
+    elif method == "PUT":
+        return f"Update existing {resource} information"
+    elif method == "PATCH":
+        return f"Partially modify {resource}"
+    elif method == "DELETE":
+        return f"Remove {resource} from system"
+    else:
+        return f"Execute {method} operation on {resource}"
+
+
+def generate_ui_test_scope_html(
+    endpoints: List[Dict[str, Any]],
+    ui_routes: List[Dict[str, Any]],
+    page_data: Dict[str, Dict[str, Any]],
+    project_name: str = "Project",
+    selected_tools: Optional[List[str]] = None,
+    llm_insights: Optional[List[Dict[str, Any]]] = None,
+    application_type: str = "",
+) -> str:
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    tools_str = ", ".join(selected_tools or ["Playwright", "Selenium"])
+    tool_label = (selected_tools or ["Playwright"])[0]
+
+    # Build a pd_map to track page_data for stats
+    pd_map: Dict[str, Dict[str, Any]] = {}
+
+    ui_test_rows = ""
+    for idx, route_info in enumerate(ui_routes[:30]):
+        route = route_info["route"] if isinstance(route_info, dict) else route_info
+        ui_test_rows += _build_dynamic_ui_test_row(idx, route_info, page_data, tool_label)
+        if isinstance(route_info, dict):
+            source = route_info.get("source_file", "")
+            if source and source in page_data:
+                pd_map[route] = page_data[source]
+
+    total_pages = len(ui_routes[:30])
+    interacting_pages = sum(1 for pd in pd_map.values() if pd.get("forms") or pd.get("has_tables"))
+    total_forms = sum(1 for pd in pd_map.values() if pd.get("forms"))
+    total_tables = sum(1 for pd in pd_map.values() if pd.get("has_tables"))
+    has_llm = bool(llm_insights)
+
+    # Build LLM insights section
+    llm_section = ""
+    if has_llm:
+        llm_items = ""
+        for insight in llm_insights[:8]:
+            route = insight.get("route", "")
+            scenario = insight.get("test_scenario", "")
+            steps = insight.get("test_steps", [])
+            steps_html = ""
+            for s in steps[:4]:
+                steps_html += f"<li>{_escape_html(s)}</li>"
+            llm_items += f"""
+            <div class="llm-card">
+                <div class="llm-route"><code>{_escape_html(route)}</code></div>
+                <div class="llm-scenario">{_escape_html(scenario)}</div>
+                <ul class="llm-steps">{steps_html}</ul>
+            </div>"""
+        if llm_items:
+            llm_section = f"""
+            <div class="section llm-section">
+                <h2 style="font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:20px;">🤖</span> AI-Recommended Test Scenarios
+                </h2>
+                <p style="font-size:13px;color:#64748b;margin-bottom:16px;">
+                    The following project-specific test scenarios were generated by analyzing your application's
+                    actual pages, forms, and interactions.
+                </p>
+                {llm_items}
+            </div>"""
+
+    # Build project-specific validation list
+    validation_items = ""
+    if pd_map:
+        has_forms_any = any(pd.get("forms") for pd in pd_map.values())
+        has_tables_any = any(pd.get("has_tables") for pd in pd_map.values())
+        has_spa = any(
+            isinstance(r, dict) and r.get("page_type") == "spa_route"
+            for r in ui_routes[:30]
+        )
+        if has_forms_any:
+            validation_items += "<li>Form submissions on each page work correctly with valid field data</li>"
+            validation_items += "<li>Form validation errors display properly for empty or invalid inputs</li>"
+            validation_items += "<li>Submit buttons trigger correct backend actions without 500 errors</li>"
+        if has_tables_any:
+            validation_items += "<li>Data tables render with the correct column headers and row content</li>"
+            validation_items += "<li>Table pagination, sorting, and filtering functions operate correctly</li>"
+        if has_spa:
+            validation_items += "<li>SPA route navigation works without full page reloads</li>"
+            validation_items += "<li>Client-side state is maintained across SPA navigation</li>"
+        validation_items += "<li>Each page loads successfully without 404 or 500 errors</li>"
+        validation_items += "<li>Navigation links and redirects function as expected</li>"
+        validation_items += "<li>Error states and edge cases are handled gracefully</li>"
+    else:
+        validation_items = """
+        <li>Each page loads successfully without 404 or 500 errors</li>
+        <li>Form fields can accept user input and submit correctly</li>
+        <li>Buttons trigger expected actions without breaking the page</li>
+        <li>Data tables display correct information with proper headers</li>
+        <li>Navigation between pages works seamlessly</li>
+        <li>Error states are handled gracefully (no blank screens)</li>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI Functional Test Scope - {_escape_html(project_name)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:'Inter',-apple-system,sans-serif; background:#f8fafc; color:#1e293b; padding:40px; }}
+.container {{ max-width:1200px; margin:0 auto; }}
+.header {{ background:linear-gradient(135deg,#1e293b,#334155); color:#fff; padding:32px 40px; border-radius:16px; margin-bottom:32px; }}
+.header h1 {{ font-size:26px; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }}
+.header .sub {{ font-size:14px; color:#94a3b8; }}
+.header .meta {{ display:flex; gap:24px; margin-top:16px; font-size:12px; color:#cbd5e1; }}
+.stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:32px; }}
+.stat-card {{ background:#fff; border-radius:12px; padding:20px 24px; border:1px solid #e2e8f0; }}
+.stat-card .num {{ font-size:32px; font-weight:800; color:#0f172a; }}
+.stat-card .label {{ font-size:12px; color:#64748b; margin-top:4px; font-weight:500; }}
+table {{ width:100%; border-collapse:collapse; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
+th {{ background:#f1f5f9; padding:14px 16px; text-align:left; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.8px; border-bottom:1px solid #e2e8f0; }}
+td {{ padding:14px 16px; border-bottom:1px solid #f1f5f9; font-size:13px; }}
+tr:hover {{ background:#f8fafc; }}
+.scope-badge {{ display:inline-block; padding:3px 12px; border-radius:20px; font-size:11px; font-weight:600; }}
+.scope-interact {{ background:#dbeafe; color:#1d4ed8; }}
+.scope-view {{ background:#f1f5f9; color:#64748b; }}
+.use-case {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:24px; margin-bottom:24px; }}
+.use-case h3 {{ font-size:15px; font-weight:700; color:#0f172a; margin-bottom:12px; }}
+.use-case ul {{ list-style:none; padding:0; }}
+.use-case li {{ padding:8px 0; font-size:13px; color:#475569; border-bottom:1px solid #f1f5f9; }}
+.use-case li:last-child {{ border-bottom:none; }}
+.use-case li::before {{ content:"\\2713"; color:#22c55e; font-weight:700; margin-right:10px; }}
+.llm-section {{ margin-top:32px; }}
+.llm-card {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:16px; }}
+.llm-route {{ margin-bottom:8px; }}
+.llm-scenario {{ font-weight:600; color:#0f172a; font-size:14px; margin-bottom:8px; }}
+.llm-steps {{ list-style:none; padding:0; margin:0; }}
+.llm-steps li {{ padding:4px 0; font-size:12px; color:#64748b; }}
+.llm-steps li::before {{ content:"\\25B6"; color:#3b82f6; margin-right:8px; font-size:10px; }}
+.section {{ margin-bottom:24px; }}
+.footer {{ text-align:center; margin-top:40px; padding:20px; font-size:11px; color:#94a3b8; }}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>UI Functional Test Scope</h1>
+<div class="sub">{_escape_html(project_name)}</div>
+<div class="meta">
+<span>Generated: {now_utc} UTC</span>
+<span>Testing Tool: {_escape_html(tools_str)}</span>
+{f'<span>App Type: {_escape_html(application_type)}</span>' if application_type else ''}
+</div>
+</div>
+
+<div class="stats">
+<div class="stat-card"><div class="num">{total_pages}</div><div class="label">Pages to Test</div></div>
+<div class="stat-card"><div class="num">{len(ui_routes)}</div><div class="label">Detected Routes</div></div>
+<div class="stat-card"><div class="num">{total_forms}</div><div class="label">Forms Detected</div></div>
+<div class="stat-card"><div class="num">{total_tables}</div><div class="label">Data Tables</div></div>
+</div>
+
+<div class="use-case">
+<h3>Project-Specific Validation Scope</h3>
+<ul>
+{validation_items}
+</ul>
+</div>
+
+{llm_section}
+
+<h2 style="font-size:18px;font-weight:700;margin-bottom:16px;">Test Case Details</h2>
+<table>
+<thead>
+<tr>
+<th style="width:40px;">#</th>
+<th style="width:120px;">Route</th>
+<th style="width:100px;">Type</th>
+<th>Business Test Scenario</th>
+<th style="width:90px;">Interaction</th>
+<th>Test Steps / Fields</th>
+</tr>
+</thead>
+<tbody>
+{ui_test_rows}
+</tbody>
+</table>
+
+<div class="footer">
+<p>This document outlines project-specific UI functional test automation for {_escape_html(project_name)}.</p>
+<p>Generated dynamically from source code analysis — JavaAPEX Functional Test Pipeline</p>
+</div>
+</div>
+</body>
+</html>"""
+
+
+def generate_api_test_scope_html(
+    endpoints: List[Dict[str, Any]],
+    project_name: str = "Project",
+    selected_tools: Optional[List[str]] = None,
+    llm_insights: Optional[List[Dict[str, Any]]] = None,
+    application_type: str = "",
+) -> str:
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    tools_str = ", ".join(selected_tools or ["REST Assured", "MockMvc"])
+
+    api_test_rows = ""
+    for idx, ep in enumerate(endpoints[:50]):
+        api_test_rows += _build_dynamic_api_test_row(idx, ep)
+
+    total_apis = len(endpoints[:50])
+    get_count = sum(1 for e in endpoints if e.get("method","").upper() == "GET")
+    post_count = sum(1 for e in endpoints if e.get("method","").upper() == "POST")
+    put_patch_count = sum(1 for e in endpoints if e.get("method","").upper() in ("PUT", "PATCH"))
+    delete_count = sum(1 for e in endpoints if e.get("method","").upper() == "DELETE")
+    has_llm = bool(llm_insights)
+
+    controllers = set()
+    for e in endpoints:
+        c = e.get("controller", "")
+        if c:
+            controllers.add(c.replace("Controller", ""))
+    controller_count = len(controllers)
+
+    # Build LLM insights section for API
+    llm_section = ""
+    if has_llm:
+        llm_items = ""
+        for insight in llm_insights[:10]:
+            method = insight.get("method", "")
+            path = insight.get("path", "")
+            scenario = insight.get("test_scenario", "")
+            assertions = insight.get("assertions", [])
+            assertions_html = ""
+            for a in assertions[:4]:
+                assertions_html += f"<li>{_escape_html(a)}</li>"
+            method_color = {"GET": "#2563eb", "POST": "#16a34a", "PUT": "#f59e0b", "PATCH": "#8b5cf6", "DELETE": "#ef4444"}.get(method, "#64748b")
+            llm_items += f"""
+            <div class="llm-card">
+                <div class="llm-method"><span class="method-pill" style="background:{method_color};">{_escape_html(method)}</span> <code>{_escape_html(path)}</code></div>
+                <div class="llm-scenario">{_escape_html(scenario)}</div>
+                <ul class="llm-assertions">{assertions_html}</ul>
+            </div>"""
+        if llm_items:
+            llm_section = f"""
+            <div class="section llm-section">
+                <h2 style="font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:20px;">🤖</span> AI-Recommended API Test Scenarios
+                </h2>
+                <p style="font-size:13px;color:#64748b;margin-bottom:16px;">
+                    Project-specific test scenarios generated by analyzing your actual API endpoints, controllers, and data models.
+                </p>
+                {llm_items}
+            </div>"""
+
+    # Build project-specific validation list
+    validation_items = ""
+    if endpoints:
+        has_create = post_count > 0
+        has_update = put_patch_count > 0
+        has_delete = delete_count > 0
+        validation_items += f"<li>All {total_apis} API endpoints respond with correct HTTP status codes for happy-path requests</li>"
+        if has_create:
+            validation_items += "<li>POST endpoints validate required fields and return 201 Created with proper Location headers</li>"
+        if has_update:
+            validation_items += "<li>PUT/PATCH endpoints correctly update resources and return modified representations</li>"
+        if has_delete:
+            validation_items += "<li>DELETE endpoints remove resources and return 204 No Content</li>"
+        validation_items += "<li>Response payloads conform to expected JSON schemas with correct data types</li>"
+        validation_items += "<li>Error scenarios return appropriate 4xx/5xx status codes with descriptive error messages</li>"
+        validation_items += "<li>Authentication/authorization headers are properly validated on protected endpoints</li>"
+        if controller_count > 0:
+            validation_items += f"<li>All {controller_count} controller modules ({', '.join(sorted(controllers)[:5])}) are covered with dedicated test suites</li>"
+    else:
+        validation_items = """
+        <li>Each API endpoint responds with the correct HTTP status code</li>
+        <li>Response bodies contain valid JSON with expected data structures</li>
+        <li>CRUD operations work correctly (Create, Read, Update, Delete)</li>
+        <li>Error cases return meaningful error messages (400, 404, 500)</li>
+        <li>Authentication and authorization guards are enforced</li>
+        <li>API response times are within acceptable limits</li>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Functional Test Scope - {_escape_html(project_name)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:'Inter',-apple-system,sans-serif; background:#f8fafc; color:#1e293b; padding:40px; }}
+.container {{ max-width:1200px; margin:0 auto; }}
+.header {{ background:linear-gradient(135deg,#0f172a,#1e293b); color:#fff; padding:32px 40px; border-radius:16px; margin-bottom:32px; }}
+.header h1 {{ font-size:26px; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }}
+.header .sub {{ font-size:14px; color:#94a3b8; }}
+.header .meta {{ display:flex; gap:24px; margin-top:16px; font-size:12px; color:#cbd5e1; }}
+.stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:16px; margin-bottom:32px; }}
+.stat-card {{ background:#fff; border-radius:12px; padding:20px 24px; border:1px solid #e2e8f0; }}
+.stat-card .num {{ font-size:32px; font-weight:800; color:#0f172a; }}
+.stat-card .label {{ font-size:12px; color:#64748b; margin-top:4px; font-weight:500; }}
+table {{ width:100%; border-collapse:collapse; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
+th {{ background:#f1f5f9; padding:14px 16px; text-align:left; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.8px; border-bottom:1px solid #e2e8f0; }}
+td {{ padding:14px 16px; border-bottom:1px solid #f1f5f9; font-size:13px; }}
+tr:hover {{ background:#f8fafc; }}
+.method-badge {{ display:inline-block; }}
+.method-pill {{ display:inline-block; padding:2px 8px; border-radius:4px; color:#fff; font-size:11px; font-weight:700; margin-right:8px; }}
+.use-case {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:24px; margin-bottom:24px; }}
+.use-case h3 {{ font-size:15px; font-weight:700; color:#0f172a; margin-bottom:12px; }}
+.use-case ul {{ list-style:none; padding:0; }}
+.use-case li {{ padding:8px 0; font-size:13px; color:#475569; border-bottom:1px solid #f1f5f9; }}
+.use-case li:last-child {{ border-bottom:none; }}
+.use-case li::before {{ content:"\\2713"; color:#22c55e; font-weight:700; margin-right:10px; }}
+.llm-section {{ margin-top:32px; }}
+.llm-card {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:16px; }}
+.llm-method {{ margin-bottom:8px; }}
+.llm-scenario {{ font-weight:600; color:#0f172a; font-size:14px; margin-bottom:8px; }}
+.llm-assertions {{ list-style:none; padding:0; margin:0; }}
+.llm-assertions li {{ padding:4px 0; font-size:12px; color:#64748b; }}
+.llm-assertions li::before {{ content:"\\25B6"; color:#3b82f6; margin-right:8px; font-size:10px; }}
+.section {{ margin-bottom:24px; }}
+.footer {{ text-align:center; margin-top:40px; padding:20px; font-size:11px; color:#94a3b8; }}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>API Functional Test Scope</h1>
+<div class="sub">{_escape_html(project_name)}</div>
+<div class="meta">
+<span>Generated: {now_utc} UTC</span>
+<span>Testing Tool: {_escape_html(tools_str)}</span>
+{f'<span>Controllers: {controller_count}</span>' if controller_count else ''}
+</div>
+</div>
+
+<div class="stats">
+<div class="stat-card"><div class="num">{total_apis}</div><div class="label">API Endpoints to Test</div></div>
+<div class="stat-card"><div class="num" style="color:#2563eb;">{get_count}</div><div class="label">GET Requests</div></div>
+<div class="stat-card"><div class="num" style="color:#16a34a;">{post_count}</div><div class="label">POST Requests</div></div>
+<div class="stat-card"><div class="num" style="color:#f59e0b;">{put_patch_count}</div><div class="label">PUT/PATCH Requests</div></div>
+<div class="stat-card"><div class="num" style="color:#ef4444;">{delete_count}</div><div class="label">DELETE Requests</div></div>
+</div>
+
+<div class="use-case">
+<h3>Project-Specific API Validation Scope</h3>
+<ul>
+{validation_items}
+</ul>
+</div>
+
+{llm_section}
+
+<h2 style="font-size:18px;font-weight:700;margin-bottom:16px;">Test Case Details</h2>
+<table>
+<thead>
+<tr>
+<th style="width:40px;">#</th>
+<th style="width:70px;">Method</th>
+<th>Endpoint Path</th>
+<th>Business Test Scenario</th>
+<th>Validation Assertions</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+{api_test_rows}
+</tbody>
+</table>
+
+<div class="footer">
+<p>This document outlines project-specific API functional test automation for {_escape_html(project_name)}.</p>
+<p>Generated dynamically from source code analysis — JavaAPEX Functional Test Pipeline</p>
+</div>
+</div>
+</body>
+</html>"""
+
 
 def _run_cmd(cwd: str, args: List[str]) -> Dict[str, Any]:
     import subprocess

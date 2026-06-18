@@ -1325,6 +1325,40 @@ export async function downloadUnitTestReport(jobId: string): Promise<Blob> {
   return requestBlob(`/migration/${jobId}/unit-test-report`, "Failed to download unit test report");
 }
 
+export interface FunctionalTestScopePreview {
+  uiScopeHtml: string;
+  apiScopeHtml: string;
+  uiTestCount: number;
+  apiTestCount: number;
+}
+
+export async function previewFunctionalTestScope(
+  projectName: string,
+  endpoints: { path: string; method: string; file?: string; controller?: string }[],
+  uiRoutes: { route: string; source_file?: string; page_type?: string; component?: string }[],
+  pageData: Record<string, any>,
+  selectedTools: string[] = [],
+  repoUrl: string = "",
+  token: string = "",
+): Promise<FunctionalTestScopePreview> {
+  return requestJson<FunctionalTestScopePreview>(
+    `/functional-test-scope/preview`,
+    "Failed to generate functional test scope preview",
+    {
+      method: "POST",
+      body: {
+        project_name: projectName,
+        endpoints,
+        uiRoutes,
+        page_data: pageData,
+        selected_tools: selectedTools,
+        repo_url: repoUrl,
+        token: token,
+      },
+    },
+  );
+}
+
 export async function downloadSonarReportPdf(jobId: string): Promise<Blob> {
   return requestBlob(`/migration/${jobId}/sonar-report-pdf`, "Failed to download Sonar PDF report");
 }

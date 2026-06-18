@@ -340,6 +340,29 @@ class FunctionalTestPipelineService:
                         "controller": "SpringBootActuator",
                     })
 
+        # ── Detect login page and pre-build login actions for auth-protected routes ──
+        login_route: Optional[str] = None
+        login_actions: Optional[List[Dict[str, Any]]] = None
+        login_pd = self._find_login_page_data(page_data)
+        if login_pd:
+            for ri in (ui_routes or []):
+                if not isinstance(ri, dict):
+                    continue
+                r_source = ri.get("source_file", "")
+                r_comp = ri.get("component", "")
+                for pd_key in page_data:
+                    if r_source and pd_key == r_source and page_data[pd_key] is login_pd:
+                        login_route = ri["route"]
+                        break
+                    if r_comp and pd_key.lower().startswith(r_comp.lower()) and page_data[pd_key] is login_pd:
+                        login_route = ri["route"]
+                        break
+                if login_route:
+                    break
+            if login_route:
+                login_actions = self._build_login_actions(login_pd)
+                logger.info("Detected login page at route=%s — will pre-authenticate before protected routes", login_route)
+
         # --- UI page tests — generate REAL actions from source analysis ---
         if ui_routes:
             for route_info in ui_routes[:30]:
@@ -359,6 +382,11 @@ class FunctionalTestPipelineService:
                 if not pd and source and source in page_data:
                     pd = page_data[source]
                 actions = self._build_actions_from_page_data(route, pd)
+
+                # Prepend login flow for auth-protected routes
+                if login_actions and self._route_requires_auth(route, source, root, login_route):
+                    actions = list(login_actions) + actions
+                    logger.info("Prepended login flow for protected route: %s", route)
 
                 if "PLAYWRIGHT" in tools:
                     test_name = self._build_smart_test_name(route, pd, "Playwright")
@@ -1037,15 +1065,15 @@ class FunctionalTestPipelineService:
             if form.get("buttons"):
                 btn_text = form["buttons"][0]
                 if form.get("id"):
-                    actions.append({"type": "click", "locator": f"#{form['id']} button[type=submit], #{form['id']} input[type=submit]"})
+                    actions.append({"type": "click", "locator": f"#{form['id']} button, #{form['id']} input[type=submit]"})
                 else:
                     # Prefer text-based locator for buttons with known label
                     actions.append({
                         "type": "click",
-                        "locator": f'button:has-text("{btn_text}"), input[type=submit], button[type=submit]',
+                        "locator": f'button:has-text("{btn_text}"), input[type=submit], button',
                     })
             else:
-                actions.append({"type": "click", "locator": "input[type=submit], button[type=submit], button"})
+                actions.append({"type": "click", "locator": "input[type=submit], button"})
 
             actions.append({"type": "assert_not_visible", "text": "500"})
             actions.append({"type": "assert_not_visible", "text": "Exception"})
@@ -1063,6 +1091,76 @@ class FunctionalTestPipelineService:
 
         return actions
 
+    @staticmethod
+    def _find_login_page_data(page_data: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        for pd in page_data.values():
+            for form in pd.get("forms", []):
+                has_password = any(f.get("type") == "password" for f in form.get("fields", []))
+                if not has_password:
+                    continue
+                buttons = [b.lower().strip() for b in form.get("buttons", [])]
+                if any("login" in b or "sign in" in b or "log in" in b for b in buttons if b):
+                    entry = dict(pd)
+                    entry["_login_form"] = form
+                    return entry
+        return None
+
+    def _build_login_actions(self, login_pd: Dict[str, Any]) -> List[Dict[str, Any]]:
+        form = login_pd.get("_login_form", {})
+        actions: List[Dict[str, Any]] = [{"type": "navigate", "url": "/"}]
+        for field in form.get("fields", []):
+            fname = field.get("name", "")
+            ftype = field.get("type", "text")
+            fid = field.get("id", "")
+            placeholder = field.get("placeholder", "")
+            if not fname and not fid and not placeholder:
+                continue
+            if fname and fid:
+                locator = f"#{fid}"
+            elif fname:
+                locator = f"[name={fname}]"
+            elif fid:
+                locator = f"#{fid}"
+            else:
+                locator = f'[placeholder="{placeholder}"]'
+            value = self._generate_test_value(fname, ftype, placeholder, {})
+            actions.append({"type": "fill", "locator": locator, "value": value})
+        btn_text = (form.get("buttons") or [""])[0]
+        if btn_text:
+            actions.append({"type": "click", "locator": f'button:has-text("{btn_text}"), input[type=submit], button'})
+        else:
+            actions.append({"type": "click", "locator": "input[type=submit], button"})
+        actions.append({"type": "assert_not_visible", "text": "500"})
+        return actions
+
+    @staticmethod
+    def _route_requires_auth(route: str, source_file: str, root: Optional[Path], login_route: Optional[str]) -> bool:
+        if not root or not source_file:
+            return False
+        if login_route and route == login_route:
+            return False
+        if route in ("/register", "/signup", "/forgot-password", "/reset-password"):
+            return False
+        try:
+            for f in root.rglob(source_file):
+                text = f.read_text(encoding="utf-8", errors="ignore")
+                patterns = [
+                    r'if\s*\(\s*!\s*user',
+                    r'if\s*\(\s*user\s*===\s*null\s*\)',
+                    r'if\s*\(\s*user\s*==\s*null\s*\)',
+                    r'useAuth\s*\(',
+                    r'useUser\s*\(',
+                    r'ProtectedRoute',
+                    r'PrivateRoute',
+                ]
+                for p in patterns:
+                    if re.search(p, text, re.IGNORECASE):
+                        return True
+                return False
+        except Exception:
+            pass
+        return False
+
     def _build_negative_test_actions(self, route: str, pd: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Build negative test actions — submit form with empty/invalid data."""
         if not pd.get("forms"):
@@ -1079,14 +1177,14 @@ class FunctionalTestPipelineService:
         btn_text = (form.get("buttons") or [""])[0]
         if form.get("id"):
             if btn_text:
-                actions.append({"type": "click", "locator": f"#{form['id']} button:has-text(\"{btn_text}\"), #{form['id']} input[type=submit], #{form['id']} button[type=submit]"})
+                actions.append({"type": "click", "locator": f"#{form['id']} button:has-text(\"{btn_text}\"), #{form['id']} input[type=submit], #{form['id']} button"})
             else:
-                actions.append({"type": "click", "locator": f"#{form['id']} input[type=submit], #{form['id']} button[type=submit]"})
+                actions.append({"type": "click", "locator": f"#{form['id']} input[type=submit], #{form['id']} button"})
         else:
             if btn_text:
-                actions.append({"type": "click", "locator": f'button:has-text("{btn_text}"), input[type=submit], button[type=submit]'})
+                actions.append({"type": "click", "locator": f'button:has-text("{btn_text}"), input[type=submit], button'})
             else:
-                actions.append({"type": "click", "locator": "input[type=submit], button[type=submit]"})
+                actions.append({"type": "click", "locator": "input[type=submit], button"})
 
         # After submitting empty form, the page should still be functional (not 500)
         actions.append({"type": "assert_not_visible", "text": "500 Internal Server Error"})
@@ -6575,8 +6673,45 @@ export default defineConfig({
 });
 """
 
+    @staticmethod
+    def _selenium_has_text_to_xpath(selector: str) -> str:
+        parts = [p.strip() for p in selector.split(",")]
+        xpath_parts = []
+        for part in parts:
+            if not part:
+                continue
+            m = re.search(r'([a-zA-Z0-9_-]+):has-text\("([^"]*)"\)', part)
+            if m:
+                tag = m.group(1)
+                text = m.group(2)
+                xpath_parts.append(f'//{tag}[contains(text(), "{text}")]')
+                continue
+            m = re.match(r'^([a-zA-Z0-9_-]+)\[([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+)\]$', part)
+            if m:
+                tag = m.group(1)
+                attr = m.group(2)
+                val = m.group(3)
+                xpath_parts.append(f'//{tag}[@{attr}="{val}"]')
+                continue
+            m = re.match(r"^([a-zA-Z0-9_-]+)\[([a-zA-Z0-9_-]+)\*='([^']+)'\]$", part)
+            if m:
+                tag = m.group(1)
+                attr = m.group(2)
+                val = m.group(3)
+                xpath_parts.append(f'//{tag}[contains(@{attr}, "{val}")]')
+                continue
+            if re.match(r'^[a-zA-Z0-9_-]+$', part):
+                xpath_parts.append(f'//{part}')
+                continue
+            xpath_parts.append(part)
+        return " | ".join(xpath_parts)
+
     def _selenium_by_locator(self, selector: str) -> str:
         sel = selector.strip()
+        if ":has-text(" in sel:
+            xpath = self._selenium_has_text_to_xpath(sel)
+            xpath = xpath.replace('"', '\\"')
+            return f'By.xpath("{xpath}")'
         sel = sel.replace('"', '\\"')
         if sel.startswith("id="):
             return f'By.id("{sel[3:]}")'

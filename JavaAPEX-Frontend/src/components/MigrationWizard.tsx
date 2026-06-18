@@ -52,6 +52,7 @@ import {
     getMigrationLogs,
     startMigration,
   getMigrationFossa,
+  previewFunctionalTestScope,
   ApiError,
 } from "../services/api";
 import type {
@@ -70,6 +71,7 @@ import type {
   SonarIssueDetail,
   SonarHotspotDetail,
   StrategyPageContext,
+  FunctionalTestScopePreview,
 } from "../services/api";
 import {
   clearWizardStorage,
@@ -6213,6 +6215,10 @@ export default function MigrationWizard() {
   // Consolidated Step 4: Migration (Build Modernization & Refactor + Code Migration + Testing)
   const [testSuiteTab, setTestSuiteTab] = useState<"unit" | "functional">("functional");
   const [hoveredToolId, setHoveredToolId] = useState<string | null>(null);
+  const [hoveredScopeCard, setHoveredScopeCard] = useState<string | null>(null);
+  const [scopePreview, setScopePreview] = useState<FunctionalTestScopePreview | null>(null);
+  const [scopePreviewLoading, setScopePreviewLoading] = useState(false);
+  const [scopePreviewError, setScopePreviewError] = useState<string | null>(null);
 
   const getConfidenceColor = (percentage: number) => {
     if (percentage >= 80) return "#22c55e";
@@ -6678,6 +6684,254 @@ export default function MigrationWizard() {
           </div>
         )}
       </div>
+
+      {/* ── Test Scope Documents ─────────────────────────────── */}
+      {testSuiteTab === "functional" && (
+        <div style={{
+          background: "#fff",
+          borderRadius: 14,
+          border: "1px solid #e2e8f0",
+          padding: "20px 24px",
+          marginBottom: 24,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <FaFileAlt style={{ fontSize: 16, color: "#0f172a" }} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>Functional Test Scope Documents</span>
+          </div>
+          <p style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6, marginBottom: 16 }}>
+            Download a business-friendly overview of the test cases that will be generated and validated
+            for your project. These documents describe the scope in clear business language for stakeholder review.
+          </p>
+          {/* ── 50/50 Card Grid for Scope Documents ── */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 16,
+          }}>
+            {/* ── UI Test Scope Card ── */}
+            <div
+              onClick={async () => {
+                if (scopePreviewLoading) return;
+                try {
+                  setScopePreviewLoading(true);
+                  setScopePreviewError(null);
+                  const endpoints = (repoAnalysis as any)?.api_endpoints || [];
+                  const uiRoutes = (repoAnalysis as any)?.uiRoutes || [];
+                  const pageData = (repoAnalysis as any)?.page_data || {};
+                  const result = await previewFunctionalTestScope(
+                    selectedRepo?.name || repoUrl.split("/").pop()?.replace(".git", "") || "Project",
+                    endpoints,
+                    uiRoutes,
+                    pageData,
+                    functionalTestToolMethod !== "auto" ? [functionalTestToolMethod] : [],
+                    repoUrl,
+                    currentToken || "",
+                  );
+                  const blob = new Blob([result.uiScopeHtml], { type: "text/html" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `ui-test-scope-${(selectedRepo?.name || "project").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}.html`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  setScopePreview(result);
+                } catch (err: any) {
+                  setScopePreviewError(err?.message || "Failed to generate scope document");
+                } finally {
+                  setScopePreviewLoading(false);
+                }
+              }}
+              onMouseEnter={() => setHoveredScopeCard("ui")}
+              onMouseLeave={() => setHoveredScopeCard(null)}
+              style={{
+                background: "#fff",
+                borderRadius: 14,
+                border: `2px solid ${hoveredScopeCard === "ui" ? "#2563eb" : "#e2e8f0"}`,
+                padding: "24px 20px 20px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+                cursor: scopePreviewLoading ? "not-allowed" : "pointer",
+                transition: "all 0.35s cubic-bezier(0.4,0,0.2,1)",
+                transform: hoveredScopeCard === "ui" ? "translateY(-4px) scale(1.01)" : "translateY(0) scale(1)",
+                boxShadow: hoveredScopeCard === "ui"
+                  ? "0 8px 24px rgba(37,99,235,0.18), 0 2px 8px rgba(37,99,235,0.08)"
+                  : "0 1px 3px rgba(0,0,0,0.06)",
+                opacity: scopePreviewLoading ? 0.6 : 1,
+              }}
+            >
+              <div style={{
+                width: 48, height: 48, borderRadius: 12,
+                background: hoveredScopeCard === "ui" ? "#dbeafe" : "#eff6ff",
+                display: "flex",
+                alignItems: "center", justifyContent: "center",
+                marginBottom: 14, fontSize: 22,
+                transition: "all 0.3s ease",
+                transform: hoveredScopeCard === "ui" ? "scale(1.1)" : "scale(1)",
+              }}>
+                📄
+              </div>
+              <h4 style={{
+                fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 8, lineHeight: 1.3,
+              }}>
+                UI Test Scope
+              </h4>
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
+                marginBottom: 10, padding: "3px 10px", borderRadius: 4,
+                background: "#dbeafe", color: "#2563eb",
+              }}>
+                Page Interactions
+              </span>
+              <p style={{
+                fontSize: 11, color: "#64748b", lineHeight: 1.5, marginBottom: 18, minHeight: 40,
+              }}>
+                Validates page loads, form submissions, table rendering, and navigation flows across all detected UI routes.
+              </p>
+              <button
+                disabled={scopePreviewLoading}
+                style={{
+                  marginTop: "auto", width: "100%", padding: "10px 0",
+                  borderRadius: 8, fontWeight: 700, fontSize: 12,
+                  border: "none",
+                  background: hoveredScopeCard === "ui"
+                    ? "#2563eb"
+                    : "#eff6ff",
+                  color: hoveredScopeCard === "ui" ? "#fff" : "#1d4ed8",
+                  boxShadow: hoveredScopeCard === "ui"
+                    ? "0 2px 8px rgba(37,99,235,0.25)"
+                    : "inset 0 0 0 1.5px #bfdbfe",
+                  cursor: scopePreviewLoading ? "not-allowed" : "pointer",
+                  transition: "all 0.3s cubic-bezier(0.4,0,0.2,1)",
+                }}
+              >
+                {scopePreviewLoading ? "⏳ Generating..." : "📄 Download UI Test Scope"}
+              </button>
+            </div>
+
+            {/* ── API Test Scope Card ── */}
+            <div
+              onClick={async () => {
+                if (scopePreviewLoading) return;
+                try {
+                  setScopePreviewLoading(true);
+                  setScopePreviewError(null);
+                  const endpoints = (repoAnalysis as any)?.api_endpoints || [];
+                  const uiRoutes = (repoAnalysis as any)?.uiRoutes || [];
+                  const pageData = (repoAnalysis as any)?.page_data || {};
+                  const result = await previewFunctionalTestScope(
+                    selectedRepo?.name || repoUrl.split("/").pop()?.replace(".git", "") || "Project",
+                    endpoints,
+                    uiRoutes,
+                    pageData,
+                    functionalTestToolMethod !== "auto" ? [functionalTestToolMethod] : [],
+                    repoUrl,
+                    currentToken || "",
+                  );
+                  const blob = new Blob([result.apiScopeHtml], { type: "text/html" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `api-test-scope-${(selectedRepo?.name || "project").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}.html`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  setScopePreview(result);
+                } catch (err: any) {
+                  setScopePreviewError(err?.message || "Failed to generate scope document");
+                } finally {
+                  setScopePreviewLoading(false);
+                }
+              }}
+              onMouseEnter={() => setHoveredScopeCard("api")}
+              onMouseLeave={() => setHoveredScopeCard(null)}
+              style={{
+                background: "#fff",
+                borderRadius: 14,
+                border: `2px solid ${hoveredScopeCard === "api" ? "#16a34a" : "#e2e8f0"}`,
+                padding: "24px 20px 20px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+                cursor: scopePreviewLoading ? "not-allowed" : "pointer",
+                transition: "all 0.35s cubic-bezier(0.4,0,0.2,1)",
+                transform: hoveredScopeCard === "api" ? "translateY(-4px) scale(1.01)" : "translateY(0) scale(1)",
+                boxShadow: hoveredScopeCard === "api"
+                  ? "0 8px 24px rgba(22,163,74,0.18), 0 2px 8px rgba(22,163,74,0.08)"
+                  : "0 1px 3px rgba(0,0,0,0.06)",
+                opacity: scopePreviewLoading ? 0.6 : 1,
+              }}
+            >
+              <div style={{
+                width: 48, height: 48, borderRadius: 12,
+                background: hoveredScopeCard === "api" ? "#bbf7d0" : "#f0fdf4",
+                display: "flex",
+                alignItems: "center", justifyContent: "center",
+                marginBottom: 14, fontSize: 22,
+                transition: "all 0.3s ease",
+                transform: hoveredScopeCard === "api" ? "scale(1.1)" : "scale(1)",
+              }}>
+                🔗
+              </div>
+              <h4 style={{
+                fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 8, lineHeight: 1.3,
+              }}>
+                API Test Scope
+              </h4>
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
+                marginBottom: 10, padding: "3px 10px", borderRadius: 4,
+                background: "#dcfce7", color: "#16a34a",
+              }}>
+                Endpoint Validation
+              </span>
+              <p style={{
+                fontSize: 11, color: "#64748b", lineHeight: 1.5, marginBottom: 18, minHeight: 40,
+              }}>
+                Validates CRUD operations, response schemas, error handling, and auth guards across all detected API endpoints.
+              </p>
+              <button
+                disabled={scopePreviewLoading}
+                style={{
+                  marginTop: "auto", width: "100%", padding: "10px 0",
+                  borderRadius: 8, fontWeight: 700, fontSize: 12,
+                  border: "none",
+                  background: hoveredScopeCard === "api"
+                    ? "#16a34a"
+                    : "#f0fdf4",
+                  color: hoveredScopeCard === "api" ? "#fff" : "#15803d",
+                  boxShadow: hoveredScopeCard === "api"
+                    ? "0 2px 8px rgba(22,163,74,0.25)"
+                    : "inset 0 0 0 1.5px #bbf7d0",
+                  cursor: scopePreviewLoading ? "not-allowed" : "pointer",
+                  transition: "all 0.3s cubic-bezier(0.4,0,0.2,1)",
+                }}
+              >
+                {scopePreviewLoading ? "⏳ Generating..." : "🔗 Download API Test Scope"}
+              </button>
+            </div>
+          </div>
+          {scopePreview && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px", borderRadius: 8,
+              background: "#f0fdf4", border: "1px solid #bbf7d0",
+              fontSize: 12, color: "#166534",
+            }}>
+              ✓ Generated: {scopePreview.uiTestCount} UI tests + {scopePreview.apiTestCount} API tests
+            </div>
+          )}
+          {scopePreviewError && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px", borderRadius: 8,
+              background: "#fef2f2", border: "1px solid #fecaca",
+              fontSize: 12, color: "#dc2626",
+            }}>
+              ⚠ {scopePreviewError}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Action buttons ─────────────────────────────────── */}
       <div style={styles.btnRow}>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -109,15 +109,18 @@ class MigrationRequest(BaseModel):
     run_tests: bool = Field(default=True, description="Run tests after migration")
     use_llm_tests: bool = Field(default=True, description="Use an LLM to generate tests and a test plan")
     llm_test_provider: str = Field(
-        default="groq",
-        description="LLM provider for test generation. Uses Groq as primary, with Claude/OpenAI fallback.",
+        default="ford_llm",
+        description="LLM provider for test generation. Uses Ford LLM as primary, with Groq/Claude/OpenAI fallback.",
     )
     run_sonar: bool = Field(default=True, description="Run SonarQube analysis")
     run_fossa: bool = Field(default=False, description="Run FOSSA license and dependency scan")
     fix_business_logic: bool = Field(default=True, description="Attempt to fix business logic issues")
-    functional_test_method: Optional[str] = Field(
+    functional_test_method: Optional[Union[str, List[str]]] = Field(
         default=None,
-        description="User-selected functional testing tool (e.g., REST_ASSURED, PLAYWRIGHT, MOCK_MVC)",
+        description="User-selected functional testing tool(s). Accepts a single tool "
+                    "(e.g. 'PLAYWRIGHT'), a comma-separated string ('PLAYWRIGHT,REST_ASSURED'), "
+                    "or a list (['PLAYWRIGHT', 'REST_ASSURED']). When omitted, the pipeline's "
+                    "auto-recommended tool set is used.",
     )
     functional_test_execution_mode: Optional[str] = Field(
         default="auto",

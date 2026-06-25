@@ -1170,7 +1170,7 @@ async def generate_test_llm(info: JavaClassInfo, llm_model: str = "") -> Optiona
     The caller should fall back to generate_test_regex().
     """
     try:
-        from services.ford_llm_service import ford_llm_service  # Uses Groq API behind the scenes
+        from services.ford_llm_service import ford_llm_service
     except ImportError:
         return None
 

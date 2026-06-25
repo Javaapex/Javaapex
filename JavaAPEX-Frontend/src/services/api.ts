@@ -445,7 +445,8 @@ export interface MigrationRequest {
   run_sonar: boolean;
   run_fossa?: boolean;
   fix_business_logic: boolean;
-  functional_test_method?: string;
+  /** A single tool, or multiple tools to validate with. Omit for auto recommendation. */
+  functional_test_method?: string | string[];
   functional_test_execution_mode?: string;
 }
 
@@ -520,6 +521,10 @@ export interface MigrationResult {
       }>;
       planning?: Record<string, unknown>;
       total_tests?: number;
+      existing_test_files?: number;
+      existing_test_cases?: number;
+      generated_test_cases?: number;
+      total_test_cases?: number;
       execution_mode?: string;
       fallback_reason?: string;
       container_required?: boolean;
@@ -543,6 +548,10 @@ export interface MigrationResult {
           message?: string;
           output_tail?: string;
           execution_mode?: string;
+          report_available?: boolean;
+          report_tool?: string;
+          allure_report_available?: boolean;
+          allure_report_tool?: string;
         }>;
       };
       message?: string;
@@ -1330,6 +1339,44 @@ export interface FunctionalTestScopePreview {
   apiScopeHtml: string;
   uiTestCount: number;
   apiTestCount: number;
+  uiTestCases?: FunctionalUiTestCase[];
+  apiTestCases?: FunctionalApiTestCase[];
+  existingTestFiles?: ExistingTestFile[];
+  existingTestFilesAll?: ExistingTestFile[];
+  existingTestFileCounts?: ExistingTestFileCounts;
+  existingTestFilesTotal?: number;
+  applicationType?: string;
+}
+
+export interface FunctionalUiTestCase {
+  route: string;
+  framework: string;
+  description: string;
+  fields?: string[];
+  actions?: string[];
+  interaction: string;
+  source?: string;
+}
+
+export interface FunctionalApiTestCase {
+  method: string;
+  path: string;
+  controller?: string;
+  description: string;
+  expectedStatus: number;
+}
+
+export interface ExistingTestFile {
+  path: string;
+  category: string; // "UNIT" | "E2E"
+  label: string;    // "JUnit" | "MockMvc" | "Test Framework" | "E2E"
+}
+
+export interface ExistingTestFileCounts {
+  junit: number;
+  mockMvc: number;
+  testFramework: number;
+  e2e: number;
 }
 
 export async function previewFunctionalTestScope(

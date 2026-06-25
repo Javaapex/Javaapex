@@ -25,11 +25,11 @@ class BLCoverageBooster:
         self.max_iterations = 5  # More iterations for 44.7% jump
         self.results = []
 
-        # Get API keys — Groq is the primary provider (replaces Ford LLM)
-        self.ford_llm_api_key = os.getenv("FORD_LLM_API_KEY", os.getenv("GROQ_API_KEY", ""))
-        self.ford_llm_api_endpoint = os.getenv("FORD_LLM_API_ENDPOINT", "https://api.groq.com/openai/v1/chat/completions")
-        self.ford_llm_model = os.getenv("FORD_LLM_MODEL", "llama-3.3-70b-versatile")
-        self.ford_llm_proxy = os.getenv("FORD_LLM_PROXY_URL", "")
+        # Get API keys — Ford LLM is the primary provider
+        self.ford_llm_api_key = os.getenv("FORD_LLM_API_KEY")
+        self.ford_llm_api_endpoint = os.getenv("FORD_LLM_API_ENDPOINT", "https://api.pivpn.core.ford.com/fordllmapi/api/v1/chat/completions")
+        self.ford_llm_model = os.getenv("FORD_LLM_MODEL", "gemini-2.5-flash")
+        self.ford_llm_proxy = os.getenv("FORD_LLM_PROXY_URL", "http://internet.ford.com:83")
         # Legacy fallbacks
         self.groq_key = os.getenv("GROQ_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")

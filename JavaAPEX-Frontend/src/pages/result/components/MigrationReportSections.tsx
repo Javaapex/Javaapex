@@ -1022,6 +1022,16 @@ export function MigrationUnitTestSection({
   const functionalRunners = functionalExecution?.runners ?? [];
   const functionalTestCases = functionalTesting?.test_cases ?? [];
 
+  // Existing vs generated functional test-case counts (mirrors the unit-test report).
+  const functionalExistingCases = functionalTesting?.existing_test_cases ?? 0;
+  const functionalGeneratedCases =
+    functionalTesting?.generated_test_cases ??
+    functionalTesting?.total_tests ??
+    functionalTestCases.length;
+  const functionalTotalCases =
+    functionalTesting?.total_test_cases ??
+    functionalExistingCases + functionalGeneratedCases;
+
   // Config/scaffolding files to hide from the report list (still included in ZIP download)
   const CONFIG_FILE_NAMES = new Set([
     'package.json',
@@ -1126,10 +1136,18 @@ export function MigrationUnitTestSection({
             </div>
           </div>
           <div style={styles.testSummaryReportGrid}>
-            {/* <div style={styles.testSummaryReportCard}>
-              <div style={styles.testSummaryReportValue}>{functionalTesting.total_tests ?? 0}</div>
-              <div style={styles.testSummaryReportLabel}>Generated</div>
-            </div> */}
+            <div style={styles.testSummaryReportCard}>
+              <div style={styles.testSummaryReportValue}>{functionalExistingCases}</div>
+              <div style={styles.testSummaryReportLabel}>Existing Test Cases</div>
+            </div>
+            <div style={styles.testSummaryReportCard}>
+              <div style={styles.testSummaryReportValue}>+{functionalGeneratedCases}</div>
+              <div style={styles.testSummaryReportLabel}>Generated Test Cases</div>
+            </div>
+            <div style={styles.testSummaryReportCard}>
+              <div style={styles.testSummaryReportValue}>{functionalTotalCases}</div>
+              <div style={styles.testSummaryReportLabel}>Total Test Cases</div>
+            </div>
             <div style={styles.testSummaryReportCard}>
               <div style={styles.testSummaryReportValue}>{functionalExecution?.tests_run ?? 0}</div>
               <div style={styles.testSummaryReportLabel}>Executed</div>
@@ -1402,35 +1420,69 @@ export function MigrationUnitTestSection({
                             </span>
                           )}
                         </div>
-                        {runner.report_available && migrationJob.job_id && (
-                          <a
-                            href={getFunctionalTestReportUrl(migrationJob.job_id, runner.report_tool || runner.tool)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 4,
-                              padding: "6px 14px",
-                              borderRadius: 8,
-                              background: "#2563eb",
-                              color: "#fff",
-                              fontSize: 12,
-                              fontWeight: 700,
-                              textDecoration: "none",
-                              boxShadow: "0 2px 8px rgba(37, 99, 235, 0.18)",
-                              transition: "all 0.15s ease",
-                              flexShrink: 0,
-                            }}
-                            onMouseOver={(e) => {
-                              e.currentTarget.style.background = "#1d4ed8";
-                            }}
-                            onMouseOut={(e) => {
-                              e.currentTarget.style.background = "#2563eb";
-                            }}
-                          >
-                            📊 View HTML Report
-                          </a>
+                        {(runner.report_available || runner.allure_report_available) && migrationJob.job_id && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                            {runner.report_available && (
+                              <a
+                                href={getFunctionalTestReportUrl(migrationJob.job_id, runner.report_tool || runner.tool)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "6px 14px",
+                                  borderRadius: 8,
+                                  background: "#2563eb",
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                  boxShadow: "0 2px 8px rgba(37, 99, 235, 0.18)",
+                                  transition: "all 0.15s ease",
+                                  flexShrink: 0,
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.background = "#1d4ed8";
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.background = "#2563eb";
+                                }}
+                              >
+                                📊 View HTML Report
+                              </a>
+                            )}
+                            {runner.allure_report_available && (
+                              <a
+                                href={getFunctionalTestReportUrl(migrationJob.job_id, runner.allure_report_tool || "allure")}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "6px 14px",
+                                  borderRadius: 8,
+                                  background: "#7c3aed",
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                  boxShadow: "0 2px 8px rgba(124, 58, 237, 0.18)",
+                                  transition: "all 0.15s ease",
+                                  flexShrink: 0,
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.background = "#6d28d9";
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.background = "#7c3aed";
+                                }}
+                              >
+                                🔬 View Allure Report
+                              </a>
+                            )}
+                          </div>
                         )}
                       </div>
                     );

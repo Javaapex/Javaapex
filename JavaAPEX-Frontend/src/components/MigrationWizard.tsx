@@ -93,8 +93,8 @@ import { WizardSectionHeading } from "./wizard/WizardSectionHeading";
 import { DiscoveryLoader } from "../pages/discovery/components/DiscoveryLoader";
 import MicroserviceAssessment from "../pages/discovery/components/MicroserviceAssessment";
 import StrategyChatWidget from "./StrategyChatWidget";
-import ConnectPage from "../pages/connect";
-import DiscoveryPage from "../pages/discovery";
+import FunctionalTestPanel, { type FunctionalToolView } from "./FunctionalTestPanel";
+import ConnectPage from "../pages/connect";import DiscoveryPage from "../pages/discovery";
 import StrategyPage from "../pages/strategy";
 import ModernizationPage from "../pages/modernization";
 import ResultPage from "../pages/result";
@@ -987,11 +987,25 @@ export default function MigrationWizard() {
   const [sonarFindingFilter, setSonarFindingFilter] = useState<SonarFindingFilter>("all");
   const [codeSmellSeverityFilter, setCodeSmellSeverityFilter] = useState<CodeSmellSeverityFilter>("all");
 
-  // Functional test tool selection for Strategy page (single-select)
-  // NOTE: persisted form state wiring will be added once migrationWizardStorage.ts types/keys are updated.
-  const [functionalTestToolMethod, setFunctionalTestToolMethod] = useState<string>(
-    persistedFormState?.functionalTestToolMethod ?? "auto"
+  // Functional test tool selection for Strategy page (MULTI-select).
+  // An empty array means "auto" (use the analyzer's recommended/active set).
+  // Seeds from the new persisted key, falling back to the legacy single-string
+  // key so in-flight wizard sessions keep their previous selection.
+  const [functionalTestToolMethods, setFunctionalTestToolMethods] = useState<string[]>(
+    () => {
+      const multi = persistedFormState?.functionalTestToolMethods;
+      if (Array.isArray(multi) && multi.length > 0) return multi;
+      const legacy = persistedFormState?.functionalTestToolMethod;
+      return legacy && legacy !== "auto" ? [legacy] : [];
+    }
   );
+
+  // Toggle a tool in/out of the multi-select set.
+  const toggleFunctionalTestTool = useCallback((id: string) => {
+    setFunctionalTestToolMethods((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  }, []);
 
   // Functional test execution mode: "auto" | "external" | "internal"
   const [functionalTestExecutionMode, setFunctionalTestExecutionMode] = useState<string>(
@@ -1151,6 +1165,17 @@ export default function MigrationWizard() {
           ? "Spec Not Found: REST endpoints exist but no OpenAPI specification file detected."
           : "Not Applicable: No REST API layer or OpenAPI specification detected.";
 
+    // ── Active (enabled) state per tool, derived from repo detection ──
+    // Rules:
+    //  • No UI layer  → Playwright is inactive; every other (API/backend) tool is active.
+    //  • Has UI + the repo already ships unit tests → only Playwright (UI) + Rest Assured (API) are active.
+    //  • Has UI + no unit tests → all tools are active.
+    const toolActive = (id: string): boolean => {
+      if (!hasUI) return id !== "PLAYWRIGHT";
+      if (_hasTests) return id === "PLAYWRIGHT" || id === "REST_ASSURED";
+      return true;
+    };
+
     return [
       {
         id: "PLAYWRIGHT",
@@ -1160,6 +1185,7 @@ export default function MigrationWizard() {
         reason: playwrightReason,
         color: "#22c55e",
         tag: playwrightTag,
+        active: toolActive("PLAYWRIGHT"),
       },
       {
         id: "REST_ASSURED",
@@ -1169,6 +1195,7 @@ export default function MigrationWizard() {
         reason: restAssuredReason,
         color: "#f59e0b",
         tag: restAssuredTag,
+        active: toolActive("REST_ASSURED"),
       },
       {
         id: "SELENIUM",
@@ -1178,6 +1205,7 @@ export default function MigrationWizard() {
         reason: seleniumReason,
         color: "#ef4444",
         tag: "Legacy Support",
+        active: toolActive("SELENIUM"),
       },
       {
         id: "MOCK_MVC",
@@ -1187,6 +1215,7 @@ export default function MigrationWizard() {
         reason: mockMvcReason,
         color: "#3b82f6",
         tag: mockMvcTag,
+        active: toolActive("MOCK_MVC"),
       },
       {
         id: "SCHEMATHESIS",
@@ -1196,6 +1225,7 @@ export default function MigrationWizard() {
         reason: schemathesisReason,
         color: "#ec4899",
         tag: schemathesisTag,
+        active: toolActive("SCHEMATHESIS"),
       },
     ];
   }, [repoAnalysis]);
@@ -3368,7 +3398,7 @@ export default function MigrationWizard() {
       runSonar,
       runFossa,
       fixBusinessLogic,
-      functionalTestToolMethod,
+      functionalTestToolMethods,
       functionalTestExecutionMode,
       migrationApproach,
       riskLevel,
@@ -4398,7 +4428,11 @@ export default function MigrationWizard() {
         getRepoVisibility(normalizedUrl, currentToken)
         .then((visibility) => {
           if (cancelled) return;
-          if (visibility.requires_token || visibility.visibility === "private") {
+          if (
+            visibility.requires_token ||
+            visibility.visibility === "private" ||
+            visibility.visibility === "private_or_inaccessible"
+          ) {
             setIsPrivateRepo(true);
             setError("");
             resetAccessTokenValidationState();
@@ -4808,7 +4842,7 @@ export default function MigrationWizard() {
       run_sonar: runSonar,
       run_fossa: runFossa,
       fix_business_logic: fixBusinessLogic,
-      functional_test_method: functionalTestToolMethod === "auto" ? undefined : functionalTestToolMethod,
+      functional_test_method: functionalTestToolMethods.length > 0 ? functionalTestToolMethods : undefined,
       functional_test_execution_mode: functionalTestExecutionMode === "auto" ? undefined : functionalTestExecutionMode,
     };
   }, [
@@ -4831,7 +4865,7 @@ export default function MigrationWizard() {
     runSonar,
     runFossa,
     fixBusinessLogic,
-    functionalTestToolMethod,
+    functionalTestToolMethods,
     functionalTestExecutionMode,
   ]);
 
@@ -6220,6 +6254,68 @@ export default function MigrationWizard() {
   const [scopePreviewLoading, setScopePreviewLoading] = useState(false);
   const [scopePreviewError, setScopePreviewError] = useState<string | null>(null);
 
+  // Build the payload sent to the functional-test-scope preview API.
+  const buildScopePreviewArgs = () => {
+    const endpoints = (repoAnalysis as any)?.api_endpoints || [];
+    const uiRoutes = (repoAnalysis as any)?.uiRoutes || [];
+    const pageData = (repoAnalysis as any)?.page_data || {};
+    const projectName =
+      selectedRepo?.name || repoUrl.split("/").pop()?.replace(".git", "") || "Project";
+    return { endpoints, uiRoutes, pageData, projectName };
+  };
+
+  // Load (without downloading) the functional test scope preview so the inline
+  // UI/API test-case lists and existing-test-file data show immediately.
+  const loadScopePreview = async (force = false): Promise<FunctionalTestScopePreview | null> => {
+    if (scopePreviewLoading) return scopePreview;
+    if (scopePreview && !force) return scopePreview;
+    try {
+      setScopePreviewLoading(true);
+      setScopePreviewError(null);
+      const { endpoints, uiRoutes, pageData, projectName } = buildScopePreviewArgs();
+      const result = await previewFunctionalTestScope(
+        projectName,
+        endpoints,
+        uiRoutes,
+        pageData,
+        functionalTestToolMethods,
+        repoUrl,
+        currentToken || "",
+      );
+      setScopePreview(result);
+      return result;
+    } catch (err: any) {
+      setScopePreviewError(err?.message || "Failed to generate test scope");
+      return null;
+    } finally {
+      setScopePreviewLoading(false);
+    }
+  };
+
+  // Download the generated UI / API scope HTML document.
+  const downloadScopeHtml = async (which: "ui" | "api") => {
+    const result = scopePreview || (await loadScopePreview());
+    if (!result) return;
+    const html = which === "ui" ? result.uiScopeHtml : result.apiScopeHtml;
+    const { projectName } = buildScopePreviewArgs();
+    const safeName = (selectedRepo?.name || projectName || "project").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${which}-test-scope-${safeName}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Auto-load the scope preview when the user reaches the functional test step.
+  useEffect(() => {
+    if (step === 4 && testSuiteTab === "functional" && repoAnalysis && !scopePreview && !scopePreviewLoading) {
+      void loadScopePreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, testSuiteTab, repoAnalysis]);
+
   const getConfidenceColor = (percentage: number) => {
     if (percentage >= 80) return "#22c55e";
     if (percentage >= 60) return "#3b82f6";
@@ -6227,8 +6323,53 @@ export default function MigrationWizard() {
     return "#ef4444";
   };
 
+  // Compact "existing test files" count badges (JUnit / MockMvc / Test Framework / E2E).
+  // Reused on the migration page so both the Unit Tests and Functional Tests
+  // sections surface how many test files already exist in the repository.
+  const renderExistingTestCountBadges = (
+    badges: { label: string; count: number; kind: "UNIT" | "E2E"; color: string; icon: string }[],
+  ) => {
+    const visible = badges.filter((b) => b.count > 0);
+    if (visible.length === 0) return null;
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {visible.map((b) => (
+          <div
+            key={b.label}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 11px", borderRadius: 9,
+              border: "1px solid #e2e8f0", background: "#fff",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{b.icon}</span>
+            <span style={{ fontWeight: 800, fontSize: 14, color: b.color }}>{b.count}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{b.label}</span>
+            <span style={{
+              fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
+              padding: "2px 6px", borderRadius: 4,
+              background: b.kind === "E2E" ? "#dbeafe" : "#f1f5f9",
+              color: b.kind === "E2E" ? "#2563eb" : "#64748b",
+            }}>
+              {b.kind}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const renderMigrationStep = () => {
     const apiEndpointCount = repoAnalysis?.api_endpoints?.length ?? 0;
+    const existingCounts = scopePreview?.existingTestFileCounts;
+    const unitTestCountBadges = existingCounts
+      ? [
+          { label: "JUnit", count: existingCounts.junit ?? 0, kind: "UNIT" as const, color: "#7c3aed", icon: "🧪" },
+          { label: "MockMvc", count: existingCounts.mockMvc ?? 0, kind: "UNIT" as const, color: "#16a34a", icon: "🌱" },
+        ]
+      : [];
+    const unitTestFilesTotal = unitTestCountBadges.reduce((sum, b) => sum + b.count, 0);
 
     return (
     <div style={styles.card}>
@@ -6374,38 +6515,35 @@ export default function MigrationWizard() {
             <FaVial style={{ fontSize: 18, color: "#0f172a" }} />
             <span style={{ fontWeight: 800, fontSize: 18, color: "#0f172a" }}>Test Suites Selection</span>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setTestSuiteTab("unit")}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 18px", borderRadius: 8, fontWeight: 700, fontSize: 13,
-                border: testSuiteTab === "unit" ? "2px solid #2563eb" : "1.5px solid #e2e8f0",
-                background: testSuiteTab === "unit" ? "#eff6ff" : "#fff",
-                color: testSuiteTab === "unit" ? "#2563eb" : "#64748b",
-                cursor: "pointer", transition: "all 0.15s ease",
-              }}
-            >
-              <FaCheckCircle style={{ fontSize: 12 }} /> Unit Tests
-            </button>
-            <button
-              onClick={() => setTestSuiteTab("functional")}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 18px", borderRadius: 8, fontWeight: 700, fontSize: 13,
-                border: testSuiteTab === "functional" ? "2px solid #2563eb" : "1.5px solid #e2e8f0",
-                background: testSuiteTab === "functional" ? "#eff6ff" : "#fff",
-                color: testSuiteTab === "functional" ? "#2563eb" : "#64748b",
-                cursor: "pointer", transition: "all 0.15s ease",
-              }}
-            >
-              <FaCheckCircle style={{ fontSize: 12 }} /> Functional Tests
-            </button>
-          </div>
+          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+            Configure Unit &amp; Functional test suites
+          </span>
         </div>
 
-        {/* ── Unit Tests tab ── */}
-        {testSuiteTab === "unit" && (
+        {/* ── Stacked layout: Unit Tests (top) + Functional Tests (full width) ── */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          gap: 20,
+          alignItems: "start",
+        }}>
+          {/* ── Unit Tests column ── */}
+          <div style={{
+            background: "#fff", borderRadius: 14,
+            border: "1px solid #e2e8f0", padding: "18px 20px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 16 }}>🧪</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: "#0f172a" }}>Unit Tests</span>
+            </div>
+            {unitTestFilesTotal > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                  Existing Unit Test Files ({unitTestFilesTotal})
+                </div>
+                {renderExistingTestCountBadges(unitTestCountBadges)}
+              </div>
+            )}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{
               display: "flex", alignItems: "center", gap: 12,
@@ -6463,10 +6601,17 @@ export default function MigrationWizard() {
               </div>
             )}
           </div>
-        )}
+          </div>{/* ── end Unit Tests column ── */}
 
-        {/* ── Functional Tests tab ── */}
-        {testSuiteTab === "functional" && (
+          {/* ── Functional Tests column ── */}
+          <div style={{
+            background: "#fff", borderRadius: 14,
+            border: "1px solid #e2e8f0", padding: "18px 20px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 16 }}>🎯</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: "#0f172a" }}>Functional Tests</span>
+            </div>
           <div>
             <p style={{
               fontSize: 13, color: "#64748b", marginBottom: 20,
@@ -6538,155 +6683,24 @@ export default function MigrationWizard() {
               </div>
             )}
 
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(5, 1fr)",
-              gap: 16,
-            }}>
-              {functionalTestingTools.map((tool) => {
-                const isSelected = functionalTestToolMethod === tool.id;
-                const isHovered = hoveredToolId === tool.id;
-                const confidenceColor = getConfidenceColor(tool.confidence);
-                const circleColor = isSelected ? "#2563eb" : isHovered ? confidenceColor : "#cbd5e1";
-
-                return (
-                  <div
-                    key={tool.id}
-                    onClick={() => setFunctionalTestToolMethod(isSelected ? "auto" : tool.id)}
-                    onMouseEnter={() => setHoveredToolId(tool.id)}
-                    onMouseLeave={() => setHoveredToolId(null)}
-                    style={{
-                      background: isSelected
-                        ? "linear-gradient(180deg, #eff6ff 0%, #fff 100%)"
-                        : isHovered
-                          ? "linear-gradient(180deg, #f8fafc 0%, #fff 100%)"
-                          : "#fff",
-                      borderRadius: 14,
-                      border: `2px solid ${isSelected ? "#2563eb" : isHovered ? confidenceColor + "66" : "#e2e8f0"}`,
-                      padding: "22px 16px 16px",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      textAlign: "center",
-                      cursor: "pointer",
-                      transition: "all 0.35s cubic-bezier(0.4,0,0.2,1)",
-                      transform: isSelected
-                        ? "translateY(-6px) scale(1.02)"
-                        : isHovered
-                          ? "translateY(-4px) scale(1.01)"
-                          : "translateY(0) scale(1)",
-                      boxShadow: isSelected
-                        ? "0 8px 28px rgba(37,99,235,0.18), 0 2px 8px rgba(37,99,235,0.08)"
-                        : isHovered
-                          ? `0 8px 24px ${confidenceColor}22, 0 2px 8px rgba(0,0,0,0.06)`
-                          : "0 1px 3px rgba(0,0,0,0.06)",
-                    }}
-                  >
-                    {/* Tool icon */}
-                    <div style={{
-                      width: 44, height: 44, borderRadius: 12,
-                      background: isSelected ? "#dbeafe" : isHovered ? `${confidenceColor}15` : "#f1f5f9",
-                      display: "flex",
-                      alignItems: "center", justifyContent: "center",
-                      marginBottom: 12, fontSize: 20, color: "#475569",
-                      transition: "all 0.3s ease",
-                      transform: isHovered ? "scale(1.1)" : "scale(1)",
-                    }}>
-                      {tool.id === "PLAYWRIGHT" && "🎭"}
-                      {tool.id === "REST_ASSURED" && "🔗"}
-                      {tool.id === "MOCK_MVC" && "🌱"}
-                      {tool.id === "SELENIUM" && "🌐"}
-                      {tool.id === "SCHEMATHESIS" && "📋"}
-                    </div>
-
-                    <h4 style={{
-                      fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 6, lineHeight: 1.3,
-                      transition: "color 0.25s ease",
-                    }}>
-                      {tool.name}
-                    </h4>
-
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, textTransform: "uppercase",
-                      letterSpacing: 0.5, marginBottom: 10,
-                      padding: "2px 8px", borderRadius: 4,
-                      transition: "all 0.25s ease",
-                      background: tool.tag === "Highly Recommended" ? "#dcfce7"
-                        : tool.tag === "Integration Ready" || tool.tag === "Spec Available" ? "#dbeafe"
-                        : tool.tag === "Potential Fit" ? "#fef3c7"
-                        : tool.tag === "Legacy Support" ? "#fee2e2"
-                        : tool.tag === "Low Match" || tool.tag === "Not Detected" || tool.tag === "Not Applicable" || tool.tag === "Spec Not Found" ? "#f1f5f9"
-                        : "#f1f5f9",
-                      color: tool.tag === "Highly Recommended" ? "#16a34a"
-                        : tool.tag === "Integration Ready" || tool.tag === "Spec Available" ? "#2563eb"
-                        : tool.tag === "Potential Fit" ? "#92400e"
-                        : tool.tag === "Legacy Support" ? "#dc2626"
-                        : "#64748b",
-                    }}>
-                      {tool.tag}
-                    </span>
-
-                    <p style={{
-                      fontSize: 11, color: "#64748b", lineHeight: 1.5, marginBottom: 14, minHeight: 44,
-                      transition: "color 0.25s ease",
-                    }}>
-                      {tool.description}
-                    </p>
-
-                    {/* Confidence circle */}
-                    {renderConfidenceCircle(tool.confidence, circleColor)}
-
-                    {/* Select button */}
-                    <button
-                      style={{
-                        marginTop: 14, width: "100%", padding: "9px 0",
-                        borderRadius: 8, fontWeight: 700, fontSize: 12,
-                        border: "none",
-                        background: isSelected
-                          ? "#22c55e"
-                          : isHovered
-                            ? `${confidenceColor}18`
-                            : "#fff",
-                        color: isSelected ? "#fff" : isHovered ? confidenceColor : "#64748b",
-                        boxShadow: isSelected
-                          ? "0 2px 8px rgba(34,197,94,0.25)"
-                          : `inset 0 0 0 1.5px ${isHovered ? confidenceColor + "44" : "#e2e8f0"}`,
-                        cursor: "pointer",
-                        transition: "all 0.3s cubic-bezier(0.4,0,0.2,1)",
-                        transform: isHovered && !isSelected ? "scale(1.04)" : "scale(1)",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFunctionalTestToolMethod(isSelected ? "auto" : tool.id);
-                      }}
-                    >
-                      {isSelected ? "✓ Selected" : "Select"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            {functionalTestToolMethod !== "auto" && (
-              <div style={{ textAlign: "center", marginTop: 16 }}>
-                <button
-                  onClick={() => setFunctionalTestToolMethod("auto")}
-                  style={{
-                    background: "none", border: "none",
-                    color: "#3b82f6", fontSize: 12, fontWeight: 600,
-                    cursor: "pointer", textDecoration: "underline",
-                  }}
-                >
-                  Reset to Auto Recommendation
-                </button>
-              </div>
-            )}
+            <FunctionalTestPanel
+              tools={functionalTestingTools as FunctionalToolView[]}
+              selectedToolIds={functionalTestToolMethods}
+              onToggleTool={toggleFunctionalTestTool}
+              onResetAuto={() => setFunctionalTestToolMethods([])}
+              preview={scopePreview}
+              loading={scopePreviewLoading}
+              error={scopePreviewError}
+              onDownloadUi={() => void downloadScopeHtml("ui")}
+              onDownloadApi={() => void downloadScopeHtml("api")}
+            />
           </div>
-        )}
+          </div>{/* ── end Functional Tests column ── */}
+        </div>{/* ── end two-column grid ── */}
       </div>
 
-      {/* ── Test Scope Documents ─────────────────────────────── */}
-      {testSuiteTab === "functional" && (
+      {/* ── Legacy Test Scope Documents — now rendered inside <FunctionalTestPanel /> above ── */}
+      {false && testSuiteTab === "functional" && (
         <div style={{
           background: "#fff",
           borderRadius: 14,
@@ -6723,7 +6737,7 @@ export default function MigrationWizard() {
                     endpoints,
                     uiRoutes,
                     pageData,
-                    functionalTestToolMethod !== "auto" ? [functionalTestToolMethod] : [],
+                    functionalTestToolMethods,
                     repoUrl,
                     currentToken || "",
                   );
@@ -6825,7 +6839,7 @@ export default function MigrationWizard() {
                     endpoints,
                     uiRoutes,
                     pageData,
-                    functionalTestToolMethod !== "auto" ? [functionalTestToolMethod] : [],
+                    functionalTestToolMethods,
                     repoUrl,
                     currentToken || "",
                   );
@@ -6918,7 +6932,7 @@ export default function MigrationWizard() {
               background: "#f0fdf4", border: "1px solid #bbf7d0",
               fontSize: 12, color: "#166534",
             }}>
-              ✓ Generated: {scopePreview.uiTestCount} UI tests + {scopePreview.apiTestCount} API tests
+              ✓ Generated: {scopePreview?.uiTestCount} UI tests + {scopePreview?.apiTestCount} API tests
             </div>
           )}
           {scopePreviewError && (

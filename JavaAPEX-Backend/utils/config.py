@@ -139,26 +139,25 @@ DEFAULT_JMETER_BASE_URL = (os.environ.get("JMETER_BASE_URL") or "http://localhos
 APP_HOST = (os.environ.get("HOST") or "0.0.0.0").strip() or "0.0.0.0"
 APP_PORT = _parse_int_env("PORT", 8000)
 # ============================================
-# GROQ LLM CONFIGURATION (Primary LLM Provider, replaces Ford LLM)
+# FORD LLM CONFIGURATION (Primary LLM Provider)
 # ============================================
 FORD_LLM_ENABLED = _parse_bool_env("FORD_LLM_ENABLED", True)
-FORD_LLM_API_ENDPOINT = (os.environ.get("FORD_LLM_API_ENDPOINT") or os.environ.get("GROQ_BASE_URL") or "https://api.groq.com/openai/v1").strip().rstrip("/") + "/chat/completions"
-FORD_LLM_BASE_URL = (os.environ.get("FORD_LLM_BASE_URL") or os.environ.get("GROQ_BASE_URL") or "https://api.groq.com/openai/v1").strip().rstrip("/")
-FORD_LLM_API_KEY = (os.environ.get("FORD_LLM_API_KEY") or os.environ.get("GROQ_API_KEY") or "").strip()
+FORD_LLM_API_ENDPOINT = (os.environ.get("FORD_LLM_API_ENDPOINT") or "https://api.pivpn.core.ford.com/fordllmapi/api/v1/chat/completions").strip()
+FORD_LLM_BASE_URL = (os.environ.get("FORD_LLM_BASE_URL") or "https://api.pivpn.core.ford.com/fordllmapi/api/v1").strip().rstrip("/")
+FORD_LLM_API_KEY = (os.environ.get("FORD_LLM_API_KEY") or "").strip()
 FORD_LLM_AUTH_TYPE = (os.environ.get("FORD_LLM_AUTH_TYPE") or "bearer").strip().lower()
-FORD_LLM_MODEL = (os.environ.get("FORD_LLM_MODEL") or os.environ.get("GROQ_TEST_MODEL") or "llama-3.3-70b-versatile").strip()
-FORD_LLM_EXTRA_MODELS = _parse_csv_env("FORD_LLM_EXTRA_MODELS", [])
-FORD_LLM_FALLBACK_MODELS = _parse_csv_env("FORD_LLM_FALLBACK_MODELS", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
-FORD_LLM_TIMEOUT = max(5, _parse_int_env("FORD_LLM_TIMEOUT", 90))
-FORD_LLM_MAX_RETRIES = max(0, _parse_int_env("FORD_LLM_MAX_RETRIES", 3))
-FORD_LLM_TEMPERATURE = _parse_float_env("FORD_LLM_TEMPERATURE", 0.2)
+FORD_LLM_MODEL = (os.environ.get("FORD_LLM_MODEL") or "gemini-2.5-flash").strip()
+FORD_LLM_EXTRA_MODELS = _parse_csv_env("FORD_LLM_EXTRA_MODELS", ["gemini-2.5-flash", "gemini-2.5-pro"])
+FORD_LLM_FALLBACK_MODELS = _parse_csv_env("FORD_LLM_FALLBACK_MODELS", ["gpt-5-mini-2025-08-07", "gemini-2.5-flash"])
+FORD_LLM_TIMEOUT = max(5, _parse_int_env("FORD_LLM_TIMEOUT", 180))
+FORD_LLM_MAX_RETRIES = max(0, _parse_int_env("FORD_LLM_MAX_RETRIES", 5))
+FORD_LLM_TEMPERATURE = _parse_float_env("FORD_LLM_TEMPERATURE", 0.1)
 FORD_LLM_MAX_TOKENS = max(1, _parse_int_env("FORD_LLM_MAX_TOKENS", 4096))
-FORD_LLM_PROXY_URL = (os.environ.get("FORD_LLM_PROXY_URL") or "").strip()
+FORD_LLM_PROXY_URL = (os.environ.get("FORD_LLM_PROXY_URL") or "http://internet.ford.com:83").strip()
 FORD_LLM_VERIFY_SSL = _parse_bool_env("FORD_LLM_VERIFY_SSL", True)
-# OAuth configs kept for backward compatibility but no longer needed with Groq API
 FORD_LLM_OAUTH_TOKEN_URL = (os.environ.get("FORD_LLM_OAUTH_TOKEN_URL") or "").strip()
-FORD_LLM_OAUTH_CLIENT_ID = (os.environ.get("FORD_LLM_OAUTH_CLIENT_ID") or "").strip()
-FORD_LLM_OAUTH_CLIENT_SECRET = (os.environ.get("FORD_LLM_OAUTH_CLIENT_SECRET") or "").strip()
+FORD_LLM_OAUTH_CLIENT_ID = (os.environ.get("FORD_LLM_OAUTH_CLIENT_ID") or os.environ.get("FORDLLM_CLIENT_ID") or "").strip()
+FORD_LLM_OAUTH_CLIENT_SECRET = (os.environ.get("FORD_LLM_OAUTH_CLIENT_SECRET") or os.environ.get("FORDLLM_CLIENT_SECRET") or "").strip()
 FORD_LLM_OAUTH_SCOPE = (os.environ.get("FORD_LLM_OAUTH_SCOPE") or "").strip()
 
 OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY") or "").strip()
@@ -262,7 +261,7 @@ OLLAMA_MODEL = (os.environ.get("OLLAMA_MODEL") or "deepseek-coder:6.7b-instruct"
 OLLAMA_TEST_TEMPERATURE = _parse_float_env("OLLAMA_TEST_TEMPERATURE", 0.2)
 OLLAMA_TEST_TIMEOUT_SEC = max(5, _parse_int_env("OLLAMA_TEST_TIMEOUT_SEC", 120))
 JAVA_TEST_TIMEOUT_SEC = max(30, _parse_int_env("JAVA_TEST_TIMEOUT_SEC", 300))
-DEFAULT_LLM_PROVIDER = (os.environ.get("LLM_PROVIDER") or "groq").strip().lower() or "groq"
+DEFAULT_LLM_PROVIDER = (os.environ.get("LLM_PROVIDER") or "ford_llm").strip().lower() or "ford_llm"
 LLM_TEST_GENERATE_ADDITIONAL_WHEN_EXISTING = _parse_bool_env(
     "LLM_TEST_GENERATE_ADDITIONAL_WHEN_EXISTING", False
 )

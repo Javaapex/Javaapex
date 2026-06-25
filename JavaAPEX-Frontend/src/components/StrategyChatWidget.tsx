@@ -335,27 +335,28 @@ export default function StrategyChatWidget({ repoUrl, strategyContext }: Props) 
     });
 
     if (!hasMarkdownTable && message.comparisonTable) {
+      const comparisonTable = message.comparisonTable;
       const columnCount = Math.max(
-        message.comparisonTable.headers.length,
-        ...message.comparisonTable.rows.map((row) => row.length)
+        comparisonTable.headers.length,
+        ...comparisonTable.rows.map((row) => row.length)
       );
       elements.push(
         <div key={`${message.id}_comparison`} className="strategy-chat-table-wrap">
-          {message.comparisonTable.caption && (
-            <div className="strategy-chat-table-caption">{message.comparisonTable.caption}</div>
+          {comparisonTable.caption && (
+            <div className="strategy-chat-table-caption">{comparisonTable.caption}</div>
           )}
           <table className="strategy-chat-table">
             <thead>
               <tr>
                 {Array.from({ length: columnCount }, (_, headerIndex) => (
                   <th key={`${message.id}_c_th_${headerIndex}`}>
-                    {message.comparisonTable.headers[headerIndex] || ""}
+                    {comparisonTable.headers[headerIndex] || ""}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {message.comparisonTable.rows.map((row, rowIndex) => (
+              {comparisonTable.rows.map((row, rowIndex) => (
                 <tr key={`${message.id}_c_tr_${rowIndex}`}>
                   {Array.from({ length: columnCount }, (_, colIndex) => (
                     <td key={`${message.id}_c_td_${rowIndex}_${colIndex}`}>

@@ -617,7 +617,7 @@ class MigrationOrchestrator:
             logger.warning("Pre-migration validation failed (non-fatal): %s", pre_val_err)
             self.job_service.add_log(job_id, f"Pre-migration validation skipped: {pre_val_err}")
 
-        llm_provider = "groq"
+        llm_provider = "ford_llm"
         use_llm_tests = getattr(request, "use_llm_tests", True)
         test_result = await self.migration_service.run_tests(
             clone_path,

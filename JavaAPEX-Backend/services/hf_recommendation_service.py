@@ -45,9 +45,9 @@ class HFRecommendationService:
         self.model = HF_MODEL
 
     async def recommend_target_version(self, analysis_payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Use Groq first if available (replaces Ford LLM); otherwise fall back to HF_TOKEN
+        # Use Ford LLM first if available; otherwise fall back to HF_TOKEN
         if not (self.ford_llm_enabled and self.ford_llm_api_key) and not self.hf_token:
-            raise ValueError("Neither Groq API key (GROQ_API_KEY) nor HF_TOKEN is configured.")
+            raise ValueError("Neither Ford LLM API key nor HF_TOKEN is configured.")
 
         prompt_payload = self._build_prompt_payload(analysis_payload)
         cache_key = build_llm_cache_key(
@@ -116,9 +116,10 @@ class HFRecommendationService:
             f"Repository summary:\n{json.dumps(prompt_payload, indent=2)}"
         )
 
-        # ── Primary: Groq (replaces Ford LLM) ──
+        # ── Primary: Ford LLM ──
         if self.ford_llm_enabled and self.ford_llm_api_key:
             try:
+                proxy = self.ford_llm_proxy_url or None
                 payload: Dict[str, Any] = {
                     "model": self.ford_llm_model,
                     "messages": [
@@ -129,9 +130,13 @@ class HFRecommendationService:
                     "max_tokens": FORD_LLM_MAX_TOKENS,
                     "response_format": {"type": "json_object"},
                 }
+                if self.ford_llm_extra_models:
+                    payload["extra_body"] = {"models": self.ford_llm_extra_models}
 
                 async with httpx.AsyncClient(
                     timeout=float(self.ford_llm_timeout),
+                    **_proxy_kw(proxy),
+                    verify=self.ford_llm_verify_ssl,
                 ) as client:
                     response = await client.post(
                         self.ford_llm_api_endpoint,

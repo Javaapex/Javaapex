@@ -10,11 +10,19 @@ import httpx
 
 from utils.config import (
     FORD_LLM_API_KEY,
+    FORD_LLM_BASE_URL,
     FORD_LLM_ENABLED,
+    FORD_LLM_OAUTH_CLIENT_ID,
+    FORD_LLM_OAUTH_CLIENT_SECRET,
+    FORD_LLM_OAUTH_SCOPE,
+    FORD_LLM_OAUTH_TOKEN_URL,
+    FORD_LLM_PROXY_URL,
+    FORD_LLM_VERIFY_SSL,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
     GROQ_API_KEY,
     GROQ_BASE_URL,
+    httpx_proxy_kwargs as _proxy_kw,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,13 +41,42 @@ _EMB_SEMAPHORE = asyncio.Semaphore(_EMBEDDING_CONCURRENCY)
 # Cache a discovered Groq embedding model name to avoid repeated /models calls
 _GROQ_EMBEDDING_MODEL: str | None = None
 
-# ── Groq API key for embeddings (replaces Ford OAuth) ──
+# ── Ford LLM OAuth token cache for embeddings ──
+import time as _time
+_FORD_EMB_OAUTH_TOKEN: str | None = None
+_FORD_EMB_OAUTH_EXPIRY: float = 0.0
 
 
 async def _get_ford_embedding_token() -> str:
-    """Return the Groq API key for embeddings (replaces Ford OAuth token flow)."""
+    """Return a valid Ford LLM bearer token for embeddings.
+
+    Uses OAuth2 client-credentials when the env vars are present (the token
+    auto-refreshes ~60 s before expiry).  Falls back to the static
+    FORD_LLM_API_KEY otherwise.
+    """
+    global _FORD_EMB_OAUTH_TOKEN, _FORD_EMB_OAUTH_EXPIRY
+    has_oauth = bool(FORD_LLM_OAUTH_TOKEN_URL and FORD_LLM_OAUTH_CLIENT_ID and FORD_LLM_OAUTH_CLIENT_SECRET)
+    if has_oauth:
+        now = _time.time()
+        if _FORD_EMB_OAUTH_TOKEN and now < _FORD_EMB_OAUTH_EXPIRY - 60:
+            return _FORD_EMB_OAUTH_TOKEN
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": FORD_LLM_OAUTH_CLIENT_ID,
+            "client_secret": FORD_LLM_OAUTH_CLIENT_SECRET,
+            "scope": FORD_LLM_OAUTH_SCOPE,
+        }
+        proxy = FORD_LLM_PROXY_URL or None
+        async with httpx.AsyncClient(timeout=30.0, **_proxy_kw(proxy), verify=FORD_LLM_VERIFY_SSL) as client:
+            resp = await client.post(FORD_LLM_OAUTH_TOKEN_URL, data=data)
+            resp.raise_for_status()
+            token_data = resp.json()
+        _FORD_EMB_OAUTH_TOKEN = token_data["access_token"]
+        _FORD_EMB_OAUTH_EXPIRY = _time.time() + token_data.get("expires_in", 3600)
+        logger.info("Ford LLM embedding OAuth2 token refreshed (expires_in=%s)", token_data.get("expires_in"))
+        return _FORD_EMB_OAUTH_TOKEN
     if not FORD_LLM_API_KEY:
-        raise ValueError("Groq API key not configured for embeddings. Set GROQ_API_KEY in .env.")
+        raise ValueError("Ford LLM API key not configured for embeddings")
     return FORD_LLM_API_KEY
 
 
@@ -209,28 +246,32 @@ async def _with_retries(call_coro, *args, max_retries: int = 5, base_delay: floa
 
 
 async def _call_ford_llm_embedding(text: str, model: str = "text-embedding-3-small") -> List[float]:
-    """Call Groq embeddings endpoint (OpenAI-compatible, replaces Ford LLM)."""
+    """Call Ford LLM embeddings endpoint (OpenAI-compatible) with auto-refreshing OAuth."""
     token = await _get_ford_embedding_token()
-    url = f"{GROQ_BASE_URL}/embeddings"
+    url = f"{FORD_LLM_BASE_URL}/embeddings"
     payload = {"model": model, "input": text}
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    proxy = FORD_LLM_PROXY_URL or None
+    async with httpx.AsyncClient(timeout=30.0, **_proxy_kw(proxy), verify=FORD_LLM_VERIFY_SSL) as client:
         r = await client.post(url, headers=headers, json=payload)
         r.raise_for_status()
         data = r.json()
     if not data or not isinstance(data, dict):
-        raise ValueError("Invalid embedding response from Groq")
+        raise ValueError("Invalid embedding response from Ford LLM")
     arr = data.get("data") or []
     if not arr or not isinstance(arr, list):
-        raise ValueError("Groq embedding response missing data")
+        raise ValueError("Ford LLM embedding response missing data")
     emb = arr[0].get("embedding")
     if not isinstance(emb, list):
-        raise ValueError("Groq embedding payload invalid")
+        raise ValueError("Ford LLM embedding payload invalid")
     return [float(x) for x in emb]
 
 
 async def get_embedding(text: str) -> List[float]:
-    """Get embedding for text using available providers (Groq preferred, then OpenAI fallback).
+    """Get embedding for text using available providers (Ford LLM preferred, then Groq, then OpenAI).
+
+    This will attempt Ford LLM first, then Groq (and discover a working model via `/models`).
+    If both fail, we fall back to OpenAI.
     """
     if not text:
         return []
@@ -253,7 +294,7 @@ async def get_embedding(text: str) -> List[float]:
         async with _EMB_SEMAPHORE:
             last_exc = None
 
-            # ── Primary: Groq (replaces Ford LLM) ──
+            # ── Primary: Ford LLM ──
             if FORD_LLM_ENABLED and FORD_LLM_API_KEY:
                 try:
                     emb = await _with_retries(_call_ford_llm_embedding, text)
@@ -262,15 +303,29 @@ async def get_embedding(text: str) -> List[float]:
                     return emb
                 except Exception as exc:
                     last_exc = exc
-                    logger.warning("Groq embedding failed, trying OpenAI: %s", str(exc))
+                    logger.warning("Ford LLM embedding failed, trying Groq: %s", str(exc))
 
-            # ── Fallback: OpenAI ──
+            # ── Fallback 1: Groq ──
             try:
-                emb = await _with_retries(_call_openai_embedding, text)
-            except Exception as exc2:
-                last_exc = exc2
-                logger.error("All embedding providers failed: %s", str(exc2))
-                raise last_exc
+                emb = await _with_retries(_call_groq_embedding, text)
+            except ModelNotFoundError as mnf:
+                logger.warning("Groq model not found, falling back to OpenAI: %s", mnf)
+                try:
+                    emb = await _with_retries(_call_openai_embedding, text)
+                except Exception as exc2:
+                    last_exc = exc2
+                    logger.error("All embedding providers failed: %s", str(exc2))
+                    raise last_exc
+            except Exception as exc:
+                # other Groq errors (rate limits, etc) -> try OpenAI
+                last_exc = exc
+                logger.warning("Groq embedding failed, trying OpenAI: %s", str(exc))
+                try:
+                    emb = await _with_retries(_call_openai_embedding, text)
+                except Exception as exc2:
+                    last_exc = exc2
+                    logger.error("All embedding providers failed: %s", str(exc2))
+                    raise last_exc
 
         # store in cache
         _EMB_CACHE[text] = emb

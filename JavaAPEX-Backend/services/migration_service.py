@@ -8,7 +8,7 @@ import re
 import shutil
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import asyncio
 from services.build_migration_policy_service import build_migration_policy_service
 from services.functional_test_pipeline import functional_test_pipeline
@@ -2609,7 +2609,7 @@ class ApplicationTest {{
         target_java_version: str = "",
         issues: List[Dict[str, Any]] = None,
         job_id: str = "default",
-        functional_test_method: Optional[str] = None,
+        functional_test_method: Optional[Union[str, List[str]]] = None,
         functional_test_execution_mode: Optional[str] = "auto",
         original_source_path: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -3943,11 +3943,12 @@ test {
         return {
             "service": "build_conversion",
             "process_id": os.getpid(),
-            "default_provider": "groq",
+            "default_provider": "ford_llm",
             "total_requests": self._build_conversion_request_count,
             "provider_request_counts": dict(sorted(self._build_conversion_provider_counts.items())),
             "cache": get_llm_cache_stats(),
             "models": {
+                "ford_llm": preferred_llm_service.ford_llm_model,
                 "groq": preferred_llm_service.groq_model,
                 "claude": preferred_llm_service.claude_model,
                 "openai": preferred_llm_service.openai_model,

@@ -279,16 +279,23 @@ app.add_middleware(
 )
 logger.info("Configured CORS allowed origins: %s", CORS_ALLOWED_ORIGINS)
 
-# ── Groq LLM API Key Check ──
-# Groq uses static API keys — no OAuth token refresh needed.
+# ── Ford LLM Token Auto-Refresh ──
+# Fetches an initial token on startup and refreshes every 50 minutes
+# so the FORD_LLM_API_KEY env var always has a valid bearer token.
 try:
     from services.token_manager import ford_token_manager
     if ford_token_manager.is_configured:
-        logger.info("Groq LLM API key is configured (via GROQ_API_KEY / FORD_LLM_API_KEY)")
+        ford_token_manager.ensure_fresh_token()
+        ford_token_manager.start_auto_refresh(interval_seconds=3000)  # every 50 min
+        logger.info(
+            "Ford LLM token manager active — auto-refresh every 50 min (token #%d, ~%ds remaining)",
+            ford_token_manager.refresh_count,
+            round(ford_token_manager.remaining_seconds),
+        )
     else:
-        logger.warning("Groq LLM API key is NOT configured — set GROQ_API_KEY in .env to enable Groq LLM")
-except Exception:
-    pass
+        logger.info("Ford LLM token manager skipped — client credentials not configured")
+except Exception as _tm_err:
+    logger.warning("Ford LLM token manager init failed (non-fatal): %s", _tm_err)
 
 
 def _first_nonempty_token(*values: Optional[str]) -> str:
@@ -532,8 +539,25 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
             "does not have access",
             "not accessible with the provided github token",
             "requires authentication",
+            "not found",
+            "invalid pat token",
+            "bad credentials",
         )
         return any(marker in normalized for marker in auth_markers)
+
+    def _is_transient_error(message: str) -> bool:
+        """Detect rate-limit / connectivity errors that don't imply the repo is private."""
+        normalized = (message or "").lower()
+        transient_markers = (
+            "rate limit",
+            "timed out",
+            "timeout",
+            "failed to connect",
+            "temporarily unavailable",
+            "service unavailable",
+            "connection",
+        )
+        return any(marker in normalized for marker in transient_markers)
 
     # --- Attempt 1: try with provided token or the server default token ---
     effective_token = token.strip() if token and token.strip() else DEFAULT_GITHUB_TOKEN
@@ -557,9 +581,11 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
         logger.debug("Visibility check with token failed for %s/%s: %s", owner, repo, first_message)
 
     # --- Attempt 2: try anonymous (no token) — public repos are accessible without auth ---
+    anonymous_succeeded = False
     anonymous_message = ""
     try:
         info = await github_service.get_repo_info("", owner, repo, repo_url)
+        anonymous_succeeded = True
         is_private = info.get("is_private", False)
         if not is_private:
             # Repo is public — the default token was the problem, not the repo
@@ -570,10 +596,19 @@ async def get_repo_visibility(repo_url: str, token: str = ""):
                 "requires_token": False,
                 "message": "Public repository detected.",
             }
-    except Exception:
-        pass  # anonymous access also failed — repo is genuinely private or inaccessible
+    except Exception as anon_err:
+        anonymous_message = str(anon_err)
+        logger.debug("Anonymous visibility check failed for %s/%s: %s", owner, repo, anonymous_message)
 
-    if _is_auth_required_error(first_message):
+    # A PUBLIC repository is ALWAYS accessible anonymously. So if anonymous access
+    # failed, the repository is private or inaccessible and the user MUST supply a
+    # Personal Access Token. This is the reliable signal — it also covers the case
+    # where the server's default token is invalid/expired (in which case
+    # `first_message` would not contain the usual auth markers) and the case where
+    # GitHub returns a generic 404 "Not Found" for private repos.
+    both_transient = _is_transient_error(first_message) and _is_transient_error(anonymous_message)
+
+    if (not anonymous_succeeded and not both_transient) or _is_auth_required_error(first_message):
         return {
             "owner": owner,
             "repo": repo,
@@ -913,6 +948,237 @@ def _build_dynamic_api_test_row(idx: int, ep: Dict[str, Any]) -> str:
         </tr>"""
 
 
+def _detect_existing_test_files(root: Optional[Path]) -> Dict[str, Any]:
+    """Scan a cloned workspace for existing test files and categorize them.
+
+    Categories returned (with per-category counts):
+      * JUnit          – plain Java unit tests (``*Test.java`` / ``*Tests.java`` / ``*IT.java``)
+      * MockMvc        – Java tests that exercise Spring MockMvc / ``@WebMvcTest``
+      * Test Framework – JS/TS unit-style specs (``*.spec.ts|js`` / ``*.test.ts|js``)
+      * E2E            – Protractor / Playwright / Cypress / ``*.e2e-spec.ts`` / ``e2e`` folders
+
+    The ``functional_files`` list contains only the E2E + Test Framework files —
+    these are surfaced in the UI as "Existing Functional Test Files".
+    """
+    result: Dict[str, Any] = {
+        "files": [],
+        "functional_files": [],
+        "counts": {"junit": 0, "mockMvc": 0, "testFramework": 0, "e2e": 0},
+        "total": 0,
+    }
+    if root is None:
+        return result
+    try:
+        files = functional_test_pipeline._collect_files(root)
+    except Exception:
+        return result
+
+    def _rel(p: Path) -> str:
+        try:
+            return str(p.relative_to(root)).replace("\\", "/")
+        except Exception:
+            return p.name
+
+    for path in files:
+        name = path.name.lower()
+        rel = _rel(path)
+        rel_lower = "/" + rel.lower()
+        category: Optional[str] = None
+        label: Optional[str] = None
+
+        try:
+            if (
+                name.endswith((".e2e-spec.ts", ".e2e-spec.js", ".e2e.ts", ".e2e.js", ".cy.ts", ".cy.js", ".po.ts"))
+                or name in ("protractor.conf.js", "playwright.config.ts", "playwright.config.js", "cypress.config.ts", "cypress.config.js")
+                or "/e2e/" in rel_lower
+                or "/cypress/" in rel_lower
+            ):
+                category, label = "E2E", "E2E"
+            elif name.endswith((".spec.ts", ".spec.js", ".spec.tsx", ".spec.jsx", ".test.ts", ".test.js", ".test.tsx", ".test.jsx")):
+                category, label = "UNIT", "Test Framework"
+            elif name.endswith(("test.java", "tests.java", "it.java")):
+                text = ""
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
+                except Exception:
+                    text = ""
+                if "mockmvc" in text or "@webmvctest" in text or "org.springframework.test.web.servlet" in text:
+                    category, label = "UNIT", "MockMvc"
+                else:
+                    category, label = "UNIT", "JUnit"
+        except Exception:
+            continue
+
+        if not label:
+            continue
+
+        entry = {"path": rel, "category": category, "label": label}
+        result["files"].append(entry)
+        if label == "JUnit":
+            result["counts"]["junit"] += 1
+        elif label == "MockMvc":
+            result["counts"]["mockMvc"] += 1
+        elif label == "Test Framework":
+            result["counts"]["testFramework"] += 1
+            result["functional_files"].append(entry)
+        elif label == "E2E":
+            result["counts"]["e2e"] += 1
+            result["functional_files"].append(entry)
+
+    result["files"].sort(key=lambda e: e["path"])
+    result["functional_files"].sort(key=lambda e: (0 if e["label"] == "E2E" else 1, e["path"]))
+    result["total"] = len(result["files"])
+    return result
+
+
+def _ui_framework_label(route_info: Any) -> str:
+    """Best-effort UI framework label (Angular / React / SPA / JSP / HTML) for a route."""
+    page_type = route_info.get("page_type", "") if isinstance(route_info, dict) else ""
+    source = (route_info.get("source_file", "") if isinstance(route_info, dict) else "").lower()
+    if page_type == "spa_route" or source.endswith((".ts", ".tsx", ".js", ".jsx")):
+        if "angular" in source or source.endswith(".component.ts"):
+            return "Angular"
+        if source.endswith((".tsx", ".jsx")) or "react" in source:
+            return "React"
+        if "vue" in source or source.endswith(".vue"):
+            return "Vue"
+        return "SPA"
+    if page_type == "jsp" or source.endswith(".jsp"):
+        return "JSP"
+    if page_type in ("html", "template") or source.endswith(".html"):
+        return "HTML"
+    return "Web"
+
+
+def _build_business_ui_test_case(idx: int, route_info: Any, page_data: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a plain-English UI test case object for business stakeholders."""
+    route = route_info["route"] if isinstance(route_info, dict) else str(route_info)
+    source = route_info.get("source_file", "") if isinstance(route_info, dict) else ""
+
+    pd: Dict[str, Any] = {}
+    if isinstance(route_info, dict) and route_info.get("component"):
+        comp = route_info["component"]
+        for pd_key, pd_val in page_data.items():
+            if pd_key.lower().startswith(str(comp).lower()) and pd_val:
+                pd = pd_val
+                break
+    if not pd and source and source in page_data:
+        pd = page_data[source]
+
+    forms = pd.get("forms", []) if isinstance(pd, dict) else []
+    headings = pd.get("headings", []) if isinstance(pd, dict) else []
+    title = (pd.get("title") if isinstance(pd, dict) else "") or (headings[0] if headings else "")
+
+    field_names: List[str] = []
+    button_names: List[str] = []
+    if forms:
+        form = forms[0]
+        for f in form.get("fields", []):
+            n = f.get("name") or f.get("id") or f.get("placeholder") or ""
+            if n:
+                field_names.append(str(n))
+        for b in form.get("buttons", []):
+            if b:
+                button_names.append(str(b))
+
+    has_forms = bool(forms and field_names)
+    has_tables = bool(pd.get("has_tables")) if isinstance(pd, dict) else False
+
+    if has_forms:
+        intro = f"The user visits {route}"
+        if title:
+            intro += f" to use {title}"
+        intro += "."
+        fields_sentence = (" The user fills in fields like " + ", ".join(field_names[:5]) + ".") if field_names else ""
+        action_sentence = (" The user clicks " + ", ".join(button_names[:3]) + " to continue.") if button_names else ""
+        outcome = (
+            " After the user fills everything in, the system checks the information "
+            "and takes them to the next page with a success message."
+        )
+        description = intro + fields_sentence + action_sentence + outcome
+        interaction = "Form submission"
+    elif has_tables:
+        description = (
+            f"The user visits {route} and the page shows a table of records. "
+            "The user can read the rows, sort the columns, and move between pages of data."
+        )
+        interaction = "Data view"
+    else:
+        title_part = f" titled {title}" if title else ""
+        description = (
+            f"The user visits {route} and the page appears{title_part}. "
+            "This is a simple information page without any forms to fill out."
+        )
+        interaction = "Page view"
+
+    return {
+        "route": route,
+        "framework": _ui_framework_label(route_info),
+        "description": description,
+        "fields": field_names[:6],
+        "actions": button_names[:4],
+        "interaction": interaction,
+        "source": source,
+    }
+
+
+def _build_business_api_test_case(idx: int, ep: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a plain-English API test case object for business stakeholders."""
+    method = (ep.get("method") or "GET").upper()
+    path = ep.get("path") or "/"
+    controller = ep.get("controller") or ""
+    source = ep.get("source_file") or ""
+    if not controller and source:
+        try:
+            controller = Path(source).stem
+        except Exception:
+            controller = source
+
+    parts = [p for p in path.split("/") if p and not p.startswith("{") and not p.startswith(":")]
+    resource = parts[-1] if parts else (controller.replace("Controller", "").replace("Impl", "") or "record")
+    resource_label = resource.replace("-", " ").replace("_", " ").strip().title() or "Record"
+
+    if method == "POST":
+        status = 201
+        description = (
+            f"The application sends new {resource_label} information to {path} to create a record. "
+            "The server checks the information, saves it, and sends back a 201 response to confirm "
+            "it was added successfully."
+        )
+    elif method == "GET":
+        status = 200
+        description = (
+            f"The application asks for {resource_label} information from {path}. "
+            "The server finds the matching records and sends them back with a 200 response."
+        )
+    elif method in ("PUT", "PATCH"):
+        status = 200
+        description = (
+            f"The application updates the {resource_label} information at {path}. "
+            "The server saves the changes and returns a 200 response with the updated record."
+        )
+    elif method == "DELETE":
+        status = 204
+        description = (
+            f"The application asks the server to remove the {resource_label} record at {path}. "
+            "The server deletes it and returns a 204 response to confirm it is gone."
+        )
+    else:
+        status = 200
+        description = (
+            f"The application calls {path} using {method}. "
+            "The server processes the request and returns a successful response."
+        )
+
+    return {
+        "method": method,
+        "path": path,
+        "controller": controller,
+        "description": description,
+        "expectedStatus": status,
+    }
+
+
 async def _analyze_project_for_functional_tests(
     repo_url: str,
     token: str = "",
@@ -937,6 +1203,7 @@ async def _analyze_project_for_functional_tests(
         "framework_signals": profile.get("frameworkSignals", {}),
         "has_ui": bool(ui_routes),
         "has_api": bool(endpoints),
+        "workspace_path": str(root),
     }
 
 
@@ -952,42 +1219,79 @@ async def _llm_enhance_functional_test_scope(
         return {"ui_insights": [], "api_insights": []}
 
     try:
+        # ── Build rich UI context with full component details ──
         ui_context = []
         for r in ui_routes[:10]:
             route = r if isinstance(r, str) else r.get("route", "")
             src = r.get("source_file", "") if isinstance(r, dict) else ""
             pd = page_data.get(src, {})
-            headings = pd.get("headings", [])
             forms = pd.get("forms", [])
             has_tables = pd.get("has_tables", False)
-            fields_summary = []
-            for f in forms[:2]:
-                for field in f.get("fields", [])[:3]:
-                    fields_summary.append(field.get("name", "") or field.get("id", "") or "field")
+            table_headers = pd.get("table_headers", [])
+            select_options = pd.get("select_options", {})
+            links = pd.get("links", [])
+
+            # Build detailed component list from form data
+            components = []
+            for form in forms[:3]:
+                for field in form.get("fields", []):
+                    components.append({
+                        "element": "input",
+                        "name": field.get("name", ""),
+                        "type": field.get("type", "text"),
+                        "id": field.get("id", ""),
+                        "placeholder": field.get("placeholder", ""),
+                    })
+                for btn_text in form.get("buttons", []):
+                    components.append({
+                        "element": "button",
+                        "text": btn_text,
+                    })
+            for sel_name, sel_vals in select_options.items():
+                components.append({
+                    "element": "select",
+                    "name": sel_name,
+                    "options": sel_vals[:5],
+                })
+            if has_tables and table_headers:
+                components.append({
+                    "element": "table",
+                    "headers": table_headers[:8],
+                })
+            if links:
+                components.append({
+                    "element": "links",
+                    "hrefs": links[:8],
+                })
+
             ui_context.append({
                 "route": route,
-                "source": src,
-                "headings": headings[:3],
-                "fields": fields_summary[:3],
-                "has_forms": bool(forms),
-                "has_tables": has_tables,
+                "source_file": src,
+                "headings": pd.get("headings", [])[:5],
+                "title": pd.get("title", ""),
+                "components": components[:20],
             })
 
+        # ── Build rich API context ──
         api_context = [{
             "method": e.get("method", "GET"),
             "path": e.get("path", "/"),
             "controller": e.get("controller", ""),
-        } for e in endpoints[:15]]
+            "source_file": e.get("source_file", ""),
+        } for e in endpoints[:20]]
 
         if not ui_context and not api_context:
             return {"ui_insights": [], "api_insights": []}
 
+        # ── LLM system prompt ──
         system_prompt = (
-            "You are a QA test planning expert. Given project analysis data, "
-            "generate specific, realistic functional test scenarios for the application. "
+            "You are a QA test planning expert specializing in detailed component-level test case design. "
+            "Given a project's UI pages and API endpoints with their actual components, "
+            "generate specific, actionable test cases for each component. "
             "Return a JSON object with 'ui_insights' and 'api_insights' arrays."
         )
 
+        # ── UI user prompt ──
         user_prompt = (
             f"Project: {project_name}\n"
             f"Application Type: {analysis.get('application_type', 'Unknown')}\n"
@@ -996,35 +1300,101 @@ async def _llm_enhance_functional_test_scope(
 
         if ui_context:
             user_prompt += (
-                f"UI Pages ({len(ui_context)}):\n"
+                f"UI PAGES WITH COMPONENTS ({len(ui_context)}):\n"
                 f"{json.dumps(ui_context, indent=2)}\n\n"
-                "For each UI page, generate a business-focused test scenario description "
-                "that tests the actual page functionality (forms, tables, navigation). "
-                "Include in 'ui_insights' array: [{\"route\": \"...\", \"test_scenario\": \"...\", \"test_steps\": [\"...\"]}]\n\n"
+
+                "For each UI page, generate **component-level test cases** for every input field, button, select box, checkbox, table, and link found. "
+                "For each component, provide specific test values and expected results. "
+                "Include diverse test data: normal values, boundary values, special characters (!@#$%^&*()), "
+                "emojis (😀🎉), very long strings (500+ chars), empty values, and invalid formats.\n\n"
+
+                "Return 'ui_insights' as an array of objects with this structure:\n"
+                "{\n"
+                '  "route": "/path",\n'
+                '  "page_title": "Page Title",\n'
+                '  "component_tests": [\n'
+                "    {\n"
+                '      "component": "descriptive name like \\"email input field\\" or \\"Sign In button\\"",\n'
+                '      "type": "input | button | select | checkbox | table | link",\n'
+                '      "field_details": "placeholder=\\"Enter email\\", type=email",\n'
+                '      "test_cases": [\n'
+                '        "Enter \\"test@example.com\\" in email field - verify accepted",\n'
+                '        "Enter \\"test!@#$%^&*()@example.com\\" (special chars) - verify handled without error",\n'
+                '        "Enter emoji \\"😀🎉\\" in email field - verify properly encoded/rejected with message",\n'
+                '        "Enter 500+ character string - verify truncation or validation error shown",\n'
+                '        "Submit with empty email field - verify \\"required\\" validation message appears",\n'
+                '        "Enter numbers only \\"123456\\" - verify validation rejects invalid format"\n'
+                "      ]\n"
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "IMPORTANT: Every input field (text, email, password, number, tel, etc.) MUST have test cases for:\n"
+                "- Normal valid input\n"
+                "- Special characters (!@#$%^&*)\n"
+                "- Emojis (😀🎉🌟)\n"
+                "- Very long input (500+ chars)\n"
+                "- Empty/null input (validation)\n"
+                "- Numbers (for non-numeric fields test rejection)\n\n"
+                "Every button MUST have test cases for:\n"
+                "- Single click - verify action\n"
+                "- Double-click - verify no duplicate\n"
+                "- Click when form invalid - verify blocked\n\n"
+                "Every select box MUST have test cases for:\n"
+                "- Select each option - verify value changes\n"
+                "- Verify default selection\n\n"
+                "Every table MUST have test cases for:\n"
+                "- Verify headers render correctly\n"
+                "- Check row count/data loading\n\n"
             )
 
+        # ── API user prompt ──
         if api_context:
             user_prompt += (
-                f"API Endpoints ({len(api_context)}):\n"
+                f"API ENDPOINTS ({len(api_context)}):\n"
                 f"{json.dumps(api_context, indent=2)}\n\n"
-                "For each API endpoint, generate a business-focused test scenario description "
-                "with specific validation assertions. "
-                "Include in 'api_insights' array: [{\"method\": \"...\", \"path\": \"...\", \"test_scenario\": \"...\", \"assertions\": [\"...\"]}]\n\n"
+
+                "For each API endpoint, generate detailed test cases with:\n"
+                "- Request payload examples (valid and invalid)\n"
+                "- Expected HTTP status codes for each scenario\n"
+                "- Response body validation checks\n"
+                "- Error case coverage (400, 401, 403, 404, 500)\n\n"
+
+                "Return 'api_insights' as an array of objects with this structure:\n"
+                "{\n"
+                '  "method": "POST",\n'
+                '  "path": "/api/users",\n'
+                '  "test_scenario": "Create a new user with valid data",\n'
+                '  "test_cases": [\n'
+                '    "Send POST {\\"name\\":\\"John\\",\\"email\\":\\"john@test.com\\"} -> expect 201 Created + Location header",\n'
+                '    "Send POST with missing name field -> expect 400 Bad Request + validation error",\n'
+                '    "Send POST with invalid email format -> expect 400 Bad Request",\n'
+                '    "Send POST without auth token -> expect 401 Unauthorized",\n'
+                '    "Send POST with special chars in fields -> expect 201 if encoded, 400 if rejected"\n'
+                "  ]\n"
+                "}\n"
             )
 
         user_prompt += (
-            'Respond with a JSON object like: {"ui_insights": [...], "api_insights": [...]}. '
-            "Use empty arrays if no data for a category."
+            'Respond with a JSON object: {"ui_insights": [...], "api_insights": [...]}. '
+            "Use empty arrays if no data for a category. "
+            "Make every test case concrete with specific values - never generic."
         )
 
         result = await preferred_llm_service.request_json_groq(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=3000,
-            temperature=0.3,
-            json_mode=True,
+            max_tokens=4000,
+            temperature=0.4,
             cache_key=f"functional_test_llm_{project_name}_{hash(json.dumps(ui_context, sort_keys=True)[:200])}",
         )
+
+        # request_json_groq returns {"text": "...", "parsed": {...}, ...}
+        parsed = (result or {}).get("parsed")
+        if parsed and isinstance(parsed, dict):
+            return {
+                "ui_insights": parsed.get("ui_insights") or parsed.get("uiInsights") or [],
+                "api_insights": parsed.get("api_insights") or parsed.get("apiInsights") or [],
+            }
 
         text = (result or {}).get("text", "")
         if not text:
@@ -1060,6 +1430,7 @@ async def preview_functional_test_scope(request: dict):
         project_name = (request or {}).get("project_name", "Project")
         repo_url = (request or {}).get("repo_url", "")
         token = (request or {}).get("token", "")
+        workspace_path = ""
 
         # ── Dynamic project analysis when repo_url is given ──
         if repo_url:
@@ -1070,6 +1441,7 @@ async def preview_functional_test_scope(request: dict):
                 page_data = analysis["page_data"]
                 recommended_tools = analysis.get("recommended_tools", [])
                 application_type = analysis.get("application_type", "")
+                workspace_path = analysis.get("workspace_path", "")
 
                 # Merge selected_tools from request with recommended tools
                 selected_tools = (request or {}).get("selected_tools", [])
@@ -1132,11 +1504,42 @@ async def preview_functional_test_scope(request: dict):
             application_type=application_type,
         )
 
+        # ── Structured business-friendly test cases for inline preview ──
+        ui_test_cases = [
+            _build_business_ui_test_case(i, r, page_data)
+            for i, r in enumerate(ui_routes[:30])
+        ]
+        api_test_cases = [
+            _build_business_api_test_case(i, e)
+            for i, e in enumerate(endpoints[:50])
+            if isinstance(e, dict)
+        ]
+
+        # ── Existing test files already present in the repository ──
+        existing_tests = {
+            "files": [],
+            "functional_files": [],
+            "counts": {"junit": 0, "mockMvc": 0, "testFramework": 0, "e2e": 0},
+            "total": 0,
+        }
+        if workspace_path:
+            try:
+                existing_tests = _detect_existing_test_files(Path(workspace_path))
+            except Exception as detect_error:
+                logger.warning("[FUNCTIONAL TEST SCOPE] Existing test detection failed: %s", detect_error)
+
         return {
             "uiScopeHtml": ui_html,
             "apiScopeHtml": api_html,
             "uiTestCount": len(ui_routes[:30]),
             "apiTestCount": len(endpoints[:50]),
+            "uiTestCases": ui_test_cases,
+            "apiTestCases": api_test_cases,
+            "existingTestFiles": existing_tests.get("functional_files", []),
+            "existingTestFilesAll": existing_tests.get("files", []),
+            "existingTestFileCounts": existing_tests.get("counts", {}),
+            "existingTestFilesTotal": existing_tests.get("total", 0),
+            "applicationType": application_type,
         }
 
     except Exception as exc:
@@ -10956,32 +11359,70 @@ def generate_ui_test_scope_html(
     total_tables = sum(1 for pd in pd_map.values() if pd.get("has_tables"))
     has_llm = bool(llm_insights)
 
-    # Build LLM insights section
+    # Build LLM insights section with component-level test cases
     llm_section = ""
     if has_llm:
         llm_items = ""
-        for insight in llm_insights[:8]:
+        for insight in llm_insights[:6]:
             route = insight.get("route", "")
-            scenario = insight.get("test_scenario", "")
-            steps = insight.get("test_steps", [])
-            steps_html = ""
-            for s in steps[:4]:
-                steps_html += f"<li>{_escape_html(s)}</li>"
-            llm_items += f"""
-            <div class="llm-card">
-                <div class="llm-route"><code>{_escape_html(route)}</code></div>
-                <div class="llm-scenario">{_escape_html(scenario)}</div>
-                <ul class="llm-steps">{steps_html}</ul>
-            </div>"""
+            page_title = insight.get("page_title", "")
+            component_tests = insight.get("component_tests", [])
+            if not component_tests:
+                continue
+
+            component_cards = ""
+            for comp in component_tests[:8]:
+                comp_name = comp.get("component", "")
+                comp_type = comp.get("type", "")
+                field_details = comp.get("field_details", "")
+
+                type_icon = "📝"
+                if comp_type == "button":
+                    type_icon = "🔘"
+                elif comp_type == "select":
+                    type_icon = "📋"
+                elif comp_type == "checkbox":
+                    type_icon = "✅"
+                elif comp_type == "table":
+                    type_icon = "📊"
+                elif comp_type == "link":
+                    type_icon = "🔗"
+
+                test_lines = ""
+                for tc in comp.get("test_cases", [])[:8]:
+                    test_lines += f"<li>{_escape_html(tc)}</li>"
+
+                detail_tag = f'<span style="font-size:10px;color:#64748b;display:block;margin-bottom:6px;">{_escape_html(field_details)}</span>' if field_details else ""
+
+                component_cards += f"""
+                <div class="comp-card">
+                    <div class="comp-header">
+                        <span class="comp-icon">{type_icon}</span>
+                        <span class="comp-name">{_escape_html(comp_name)}</span>
+                        <span class="comp-badge">{_escape_html(comp_type)}</span>
+                    </div>
+                    {detail_tag}
+                    <ul class="comp-tests">{test_lines}</ul>
+                </div>"""
+
+            if component_cards:
+                title_html = f" <span style='font-size:12px;color:#94a3b8;font-weight:400;'>({_escape_html(page_title)})</span>" if page_title else ""
+                llm_items += f"""
+                <div class="llm-card">
+                    <div class="llm-route"><code>{_escape_html(route)}</code>{title_html}</div>
+                    {component_cards}
+                </div>"""
+
         if llm_items:
             llm_section = f"""
             <div class="section llm-section">
                 <h2 style="font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
-                    <span style="font-size:20px;">🤖</span> AI-Recommended Test Scenarios
+                    <span style="font-size:20px;">🤖</span> AI-Recommended Component-Level Test Cases
                 </h2>
                 <p style="font-size:13px;color:#64748b;margin-bottom:16px;">
-                    The following project-specific test scenarios were generated by analyzing your application's
-                    actual pages, forms, and interactions.
+                    Detailed component-level test cases generated by analyzing your project's actual UI elements.
+                    Each test includes specific input values, edge cases (special chars, emojis, long strings, empty),
+                    and expected behavior — ready for test automation.
                 </p>
                 {llm_items}
             </div>"""
@@ -11051,11 +11492,17 @@ tr:hover {{ background:#f8fafc; }}
 .use-case li::before {{ content:"\\2713"; color:#22c55e; font-weight:700; margin-right:10px; }}
 .llm-section {{ margin-top:32px; }}
 .llm-card {{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:16px; }}
-.llm-route {{ margin-bottom:8px; }}
-.llm-scenario {{ font-weight:600; color:#0f172a; font-size:14px; margin-bottom:8px; }}
-.llm-steps {{ list-style:none; padding:0; margin:0; }}
-.llm-steps li {{ padding:4px 0; font-size:12px; color:#64748b; }}
-.llm-steps li::before {{ content:"\\25B6"; color:#3b82f6; margin-right:8px; font-size:10px; }}
+.llm-route {{ margin-bottom:12px; font-size:13px; }}
+.llm-route code {{ background:#f1f5f9; padding:2px 8px; border-radius:4px; font-size:12px; }}
+.comp-card {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:12px; }}
+.comp-header {{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }}
+.comp-icon {{ font-size:16px; }}
+.comp-name {{ font-weight:600; color:#0f172a; font-size:13px; }}
+.comp-badge {{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; padding:2px 8px; border-radius:4px; background:#dbeafe; color:#2563eb; margin-left:auto; }}
+.comp-tests {{ list-style:none; padding:0; margin:8px 0 0 0; }}
+.comp-tests li {{ padding:6px 0 6px 20px; font-size:12px; color:#475569; border-bottom:1px solid #f1f5f9; position:relative; line-height:1.5; }}
+.comp-tests li:last-child {{ border-bottom:none; }}
+.comp-tests li::before {{ content:"\\2714"; color:#22c55e; font-weight:700; position:absolute; left:0; top:6px; font-size:11px; }}
 .section {{ margin-bottom:24px; }}
 .footer {{ text-align:center; margin-top:40px; padding:20px; font-size:11px; color:#94a3b8; }}
 </style>
@@ -11842,17 +12289,19 @@ async def get_java_version_recommendation(request: JavaVersionRecommendationRequ
     lts_versions = ["8", "11", "17", "21", "25"]
     feature_release_versions = ["22", "23", "24"] # Keep for source detection, but maybe not as recommended targets if not in Docker
 
-    normalized_provider = str(request.llm_provider or "groq").strip().lower()
-    if normalized_provider in {"ford", "ford_llm", "fordllm", "groq", "llama", "llama3", "llama-3", "llama-3.3"}:
+    normalized_provider = str(request.llm_provider or "ford_llm").strip().lower()
+    if normalized_provider in {"ford", "ford_llm", "fordllm"}:
+        normalized_provider = "ford_llm"
+    elif normalized_provider in {"groq", "llama", "llama3", "llama-3", "llama-3.3"}:
         normalized_provider = "groq"
-    elif normalized_provider in {"chatgpt", "gpt-4", "gpt4", "gpt-4.1", "openai"}:
+    if normalized_provider in {"chatgpt", "gpt-4", "gpt4", "gpt-4.1", "openai"}:
         normalized_provider = "openai"
     elif normalized_provider in {"claude", "anthropic", "paid"}:
         normalized_provider = "claude"
 
     request_payload = request.model_dump(mode="json")
 
-    if normalized_provider in {"groq", "claude", "openai"}:
+    if normalized_provider in {"ford_llm", "groq", "claude", "openai"}:
         try:
             openai_recommendation = await openai_recommendation_service.recommend_target_version(request_payload)
             # Cap the recommendation to 25 if LLM hallucinated higher

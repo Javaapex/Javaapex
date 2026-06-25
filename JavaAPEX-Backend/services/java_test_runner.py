@@ -69,26 +69,59 @@ def _detect_java_build_tool(project_path: str) -> str:
     return "unknown"
 
 
-def build_java_env(java_version: Optional[str] = None) -> Dict[str, str]:
+def build_java_env(java_version: Optional[str] = None, project_path: Optional[str] = None) -> Dict[str, str]:
     """
     Construct an environment for subprocess that forwards JAVA_HOME,
     MAVEN_OPTS, GRADLE_OPTS and the current PATH so wrappers find the JDK.
 
-    If java_version is provided, tries to select a matching JDK from environment
-    variables (e.g. JAVA_21_HOME) or standard paths.
+    JDK selection (first match wins):
+      1. When ``project_path`` is given, ``resolve_build_jdk`` picks a JDK that
+         satisfies BOTH the project's target Java *and* its Gradle version — e.g.
+         JDK 8 for a Gradle 6.3 + Java 1.8 repo (never JDK 21, which crashes
+         Gradle 6.3 with "Unsupported class file major version 65").
+      2. Otherwise, when ``java_version`` is given, select a matching JDK from
+         ``JAVA_{V}_HOME`` / standard install paths, then fall back to scanning
+         every installed JDK (``~/.jdks``, Adoptium, Corretto, Program Files …)
+         so a JDK that is installed but not on PATH is still found.
     """
     env = os.environ.copy()
 
-    if java_version:
-        # Normalize version: "11", "17", "21"
+    selected_home: Optional[str] = None
+
+    # 1. Project-aware, Gradle-version-aware selection (strongest signal). This
+    #    is what prevents the recurring "Unsupported class file major version 65"
+    #    crash: a legacy Gradle 6.3 project is built with the installed JDK 8 it
+    #    needs instead of whatever (newer) JDK happens to be on PATH.
+    #    Gated to GRADLE projects — resolve_build_jdk reasons about the Gradle
+    #    wrapper version, which is meaningless for Maven/unknown projects (and
+    #    would otherwise mis-pick an older JDK for a modern Maven build).
+    if project_path:
+        try:
+            proj_root = Path(project_path)
+            is_gradle = any(
+                (proj_root / name).exists()
+                for name in ("build.gradle", "build.gradle.kts", "gradlew", "gradlew.bat",
+                             "settings.gradle", "settings.gradle.kts")
+            ) or (proj_root / "gradle" / "wrapper" / "gradle-wrapper.properties").exists()
+            if is_gradle:
+                from utils.gradle_env import resolve_build_jdk
+                jh, _major, _project_java = resolve_build_jdk(proj_root)
+                if jh and (Path(jh) / "bin" / ("java.exe" if os.name == "nt" else "java")).exists():
+                    selected_home = jh
+        except Exception as exc:  # never let JDK resolution break the build
+            logger.debug("resolve_build_jdk failed in build_java_env: %s", exc)
+
+    # 2. Version-matched selection when the project root is unknown / unresolved.
+    if not selected_home and java_version:
+        # Normalize version: "11", "17", "21" ("1.8" → "8")
         v = str(java_version).strip()
         if v.startswith("1."):
             v = v[2:]
 
-        # 1. Look for JAVA_{V}_HOME (e.g. JAVA_21_HOME)
+        # 2a. Look for JAVA_{V}_HOME (e.g. JAVA_21_HOME)
         v_home = env.get(f"JAVA_{v}_HOME")
 
-        # 2. Look for common install paths if env var missing
+        # 2b. Look for common install paths if env var missing
         if not v_home:
             candidates = [
                 f"/opt/jdks/jdk-{v}",
@@ -100,14 +133,36 @@ def build_java_env(java_version: Optional[str] = None) -> Dict[str, str]:
                     v_home = c
                     break
 
-        if v_home:
-            logger.info("Using JDK %s for requested Java version %s", v_home, java_version)
-            env["JAVA_HOME"] = v_home
-            # Prepend bin to PATH so 'java'/'javac' matches JAVA_HOME
-            v_bin = os.path.join(v_home, "bin")
-            env["PATH"] = v_bin + os.pathsep + env.get("PATH", "")
-        else:
-            logger.debug("No specific JDK found for version %s; using default JAVA_HOME", java_version)
+        # 2c. Scan EVERY installed JDK (incl. ~/.jdks, Adoptium, Corretto, Zulu).
+        #     This finds a JDK that is installed but neither on PATH nor exposed
+        #     via JAVA_*_HOME — the exact gap that let an old-Gradle build pick up
+        #     a too-new PATH JDK and crash with "major version" errors.
+        if not v_home:
+            try:
+                from utils.gradle_env import detect_installed_jdks
+                installed = detect_installed_jdks()  # {major: java_home}
+                want = int(v) if v.isdigit() else None
+                if want is not None and installed:
+                    if want in installed:
+                        v_home = installed[want]
+                    else:
+                        # Prefer the smallest installed JDK >= the target; if none
+                        # is new enough, use the highest available.
+                        at_least = sorted(j for j in installed if j >= want)
+                        v_home = installed[at_least[0]] if at_least else installed[max(installed)]
+            except Exception as exc:
+                logger.debug("detect_installed_jdks failed in build_java_env: %s", exc)
+
+        selected_home = v_home
+
+    if selected_home:
+        logger.info("build_java_env: using JDK %s (requested Java version %s)", selected_home, java_version)
+        env["JAVA_HOME"] = selected_home
+        # Prepend bin to PATH so 'java'/'javac' matches JAVA_HOME
+        v_bin = os.path.join(selected_home, "bin")
+        env["PATH"] = v_bin + os.pathsep + env.get("PATH", "")
+    elif java_version:
+        logger.debug("No specific JDK found for version %s; using default JAVA_HOME", java_version)
 
     for var in ("JAVA_HOME", "MAVEN_HOME", "MAVEN_OPTS", "GRADLE_OPTS",
                 "GRADLE_USER_HOME", "M2_HOME"):
@@ -721,13 +776,31 @@ def _select_java_test_command(
         return ["mvn"] + base_args + extra, "maven"
 
     if tool == "gradle":
+        is_android = _project_uses_android_gradle(project_path)
+
+        # For standard (non-Android) JVM projects, ensure the dependency-variant
+        # disambiguation init script exists and apply it via --init-script. This
+        # fixes builds that abort with "Cannot choose between androidRuntimeElements
+        # and jreRuntimeElements" for libraries such as Google Guava. Android
+        # projects are skipped — they legitimately need the android runtime variant.
+        init_script_args: List[str] = []
+        if not is_android:
+            try:
+                from utils.gradle_env import ensure_init_gradle_dependency_fixes
+                ensure_init_gradle_dependency_fixes(root)
+                init_gradle = root / "init.gradle"
+                if init_gradle.exists():
+                    init_script_args = ["--init-script", str(init_gradle)]
+            except Exception as exc:
+                logger.debug("Could not prepare Gradle dependency-variant init script: %s", exc)
+
         # Android projects typically need variant-scoped unit test tasks; plain `test` can be a no-op
         # (or fail early without Android SDK configured).
-        if _project_uses_android_gradle(project_path):
+        if is_android:
             android_task = (os.getenv("ANDROID_UNIT_TEST_TASK", "") or "testDebugUnitTest").strip()
             base_args = [android_task, "--continue", "--console=plain"]
         else:
-            base_args = ["test", "--continue", "--console=plain"]
+            base_args = ["test", "--continue", "--console=plain", *init_script_args]
 
         if os.name == "nt" and (root / "gradlew.bat").exists():
             logger.debug("Using Gradle wrapper: gradlew.bat")
@@ -1050,7 +1123,7 @@ async def run_java_tests(
     """
     cmd, tool = _select_java_test_command(project_path, extra_args)
     cmd = _wrap_windows_script(cmd)
-    env = build_java_env(java_version=java_version)
+    env = build_java_env(java_version=java_version, project_path=project_path)
 
     if not cmd or tool == "unknown":
         logger.error("Cannot determine test command for %s", project_path)

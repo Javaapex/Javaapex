@@ -16,6 +16,10 @@ from utils.config import (
     FORD_LLM_MAX_RETRIES,
     FORD_LLM_MAX_TOKENS,
     FORD_LLM_MODEL,
+    FORD_LLM_OAUTH_CLIENT_ID,
+    FORD_LLM_OAUTH_CLIENT_SECRET,
+    FORD_LLM_OAUTH_SCOPE,
+    FORD_LLM_OAUTH_TOKEN_URL,
     FORD_LLM_PROXY_URL,
     FORD_LLM_TEMPERATURE,
     FORD_LLM_TIMEOUT,
@@ -54,7 +58,8 @@ class PreferredLLMService:
         self.ford_llm_max_tokens = FORD_LLM_MAX_TOKENS
         self.ford_llm_proxy_url = FORD_LLM_PROXY_URL
         self.ford_llm_verify_ssl = FORD_LLM_VERIFY_SSL
-        # OAuth fields removed — Groq uses simple API key auth
+        self._ford_oauth_token: str | None = None
+        self._ford_oauth_token_expiry: float = 0.0
         # Legacy fallbacks
         self.groq_api_key = GROQ_API_KEY
         self.groq_base_url = GROQ_BASE_URL.rstrip("/")
@@ -102,7 +107,7 @@ class PreferredLLMService:
         failures = []
 
         # Try Ford LLM first when enabled
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             try:
                 result = await self._call_ford_llm(
                     system_prompt=system_prompt,
@@ -194,7 +199,7 @@ class PreferredLLMService:
 
         # Build provider list: Ford LLM first (if enabled), then Groq
         providers = []
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             providers.append(("ford_llm", self._stream_ford_llm))
         if self.groq_api_key:
             providers.append(("groq", self._stream_groq))
@@ -262,7 +267,7 @@ class PreferredLLMService:
                     return
 
         # ── Last resort: non-streaming Ford LLM call, emitted as chunks ──
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             try:
                 logger.info("All streaming providers failed; falling back to non-streaming Ford LLM call")
                 result = await self._call_ford_llm(
@@ -320,7 +325,7 @@ class PreferredLLMService:
         failures = []
 
         # ── Primary: Ford LLM ──
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             try:
                 result = await self._call_ford_llm(
                     system_prompt=system_prompt,
@@ -443,7 +448,7 @@ class PreferredLLMService:
 
         failures: list[str] = []
         provider_streams = []
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             provider_streams.append(("ford_llm", self._stream_ford_llm))
         provider_streams.extend([
             ("groq", self._stream_groq),
@@ -512,7 +517,7 @@ class PreferredLLMService:
                     return
 
         # ── Last resort: non-streaming Ford LLM call ──
-        if self.ford_llm_enabled and self.ford_llm_api_key:
+        if self.ford_llm_enabled and (self.ford_llm_api_key or self.ford_llm_auth_type == "oauth2"):
             try:
                 logger.info("All streaming providers failed; falling back to non-streaming Ford LLM")
                 result = await self._call_ford_llm(
@@ -538,7 +543,35 @@ class PreferredLLMService:
         raise ValueError("; ".join(failures) or "No configured LLM provider is available.")
 
     async def _get_ford_auth_token(self) -> str:
-        """Return the Groq API key (replaces Ford OAuth token flow)."""
+        """Get a valid Ford LLM auth token.
+
+        Prefers OAuth2 client-credentials flow when the OAuth env vars are
+        present (regardless of FORD_LLM_AUTH_TYPE) because Ford bearer tokens
+        expire every ~1 hour and must be refreshed automatically.  Falls back
+        to the static FORD_LLM_API_KEY only when OAuth is not configured.
+        """
+        # Try OAuth2 whenever credentials are available
+        has_oauth = bool(FORD_LLM_OAUTH_TOKEN_URL and FORD_LLM_OAUTH_CLIENT_ID and FORD_LLM_OAUTH_CLIENT_SECRET)
+        if has_oauth:
+            now = time.time()
+            if self._ford_oauth_token and now < self._ford_oauth_token_expiry - 60:
+                return self._ford_oauth_token
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": FORD_LLM_OAUTH_CLIENT_ID,
+                "client_secret": FORD_LLM_OAUTH_CLIENT_SECRET,
+                "scope": FORD_LLM_OAUTH_SCOPE,
+            }
+            proxy = self.ford_llm_proxy_url or None
+            async with httpx.AsyncClient(timeout=30.0, **_proxy_kw(proxy), verify=self.ford_llm_verify_ssl) as client:
+                resp = await client.post(FORD_LLM_OAUTH_TOKEN_URL, data=data)
+                resp.raise_for_status()
+                token_data = resp.json()
+            self._ford_oauth_token = token_data["access_token"]
+            self._ford_oauth_token_expiry = time.time() + token_data.get("expires_in", 3600)
+            logger.info("Ford LLM OAuth2 token refreshed (expires_in=%s)", token_data.get("expires_in"))
+            return self._ford_oauth_token
+        # Static bearer token (no auto-refresh)
         return self.ford_llm_api_key
 
     async def _call_ford_llm(
@@ -550,10 +583,10 @@ class PreferredLLMService:
         temperature: float,
         json_mode: bool,
     ) -> Dict[str, str]:
-        """Call Groq API via OpenAI-compatible chat/completions (replaces Ford LLM)."""
+        """Call Ford LLM API (OpenAI-compatible chat/completions)."""
         token = await self._get_ford_auth_token()
         if not token:
-            raise ValueError("Groq API key is not available. Set GROQ_API_KEY in .env.")
+            raise ValueError("Ford LLM API key / OAuth token is not available.")
 
         url = self.ford_llm_api_endpoint
         messages = []
@@ -574,6 +607,8 @@ class PreferredLLMService:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if self.ford_llm_extra_models:
+            payload["extra_body"] = {"models": self.ford_llm_extra_models}
 
         proxy = self.ford_llm_proxy_url or None
         started_at = time.perf_counter()
@@ -583,6 +618,7 @@ class PreferredLLMService:
             verify=self.ford_llm_verify_ssl,
         ) as client:
             response = await client.post(url, headers=headers, json=payload)
+            # Handle models that do not support custom temperature
             if response.status_code == 400 and "temperature" in (response.text or "").lower():
                 payload.pop("temperature", None)
                 logger.info("Model %s does not support custom temperature; retrying without it", self.ford_llm_model)
@@ -591,7 +627,7 @@ class PreferredLLMService:
             data = response.json()
 
         return {
-            "provider": "groq",
+            "provider": "ford_llm",
             "model": self.ford_llm_model,
             "text": self._extract_openai_text(data),
             "usage": self._extract_usage(data),
@@ -766,10 +802,10 @@ class PreferredLLMService:
         max_tokens: int,
         temperature: float,
     ) -> AsyncIterator[Dict[str, Any]]:
-        """Stream from Groq API via OpenAI-compatible SSE (replaces Ford LLM)."""
+        """Stream from Ford LLM (OpenAI-compatible SSE)."""
         token = await self._get_ford_auth_token()
         if not token:
-            raise ValueError("Groq API key is not available. Set GROQ_API_KEY in .env.")
+            raise ValueError("Ford LLM API key / OAuth token is not available.")
 
         url = self.ford_llm_api_endpoint
         messages = []
@@ -789,8 +825,10 @@ class PreferredLLMService:
             "temperature": temperature,
             "stream": True,
         }
+        if self.ford_llm_extra_models:
+            payload["extra_body"] = {"models": self.ford_llm_extra_models}
 
-        yield {"type": "provider", "provider": "groq", "model": self.ford_llm_model}
+        yield {"type": "provider", "provider": "ford_llm", "model": self.ford_llm_model}
         usage: Dict[str, Any] = {}
         proxy = self.ford_llm_proxy_url or None
         started_at = time.perf_counter()
@@ -824,7 +862,7 @@ class PreferredLLMService:
 
         yield {
             "type": "final",
-            "provider": "groq",
+            "provider": "ford_llm",
             "model": self.ford_llm_model,
             "usage": usage,
             "latency_ms": int((time.perf_counter() - started_at) * 1000),

@@ -24,7 +24,10 @@ export interface PersistedWizardFormState {
   runSonar: boolean;
   runFossa: boolean;
   fixBusinessLogic: boolean;
+  /** Legacy single-tool selection (kept for back-compat reads of older saved state). */
   functionalTestToolMethod?: string;
+  /** Multi-select functional test tools. Empty/absent = auto recommendation. */
+  functionalTestToolMethods?: string[];
   functionalTestExecutionMode?: string;
   migrationApproach: string;
   riskLevel: string;

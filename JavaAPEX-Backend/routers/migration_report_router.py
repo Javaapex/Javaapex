@@ -273,7 +273,7 @@ def create_migration_report_router(
         request: Request,
     ):
         """Redirect bare tool URL to trailing-slash so relative assets in Allure/Playwright resolve correctly."""
-        known_tools = {"playwright", "selenium", "surefire", "allure", "restassured"}
+        known_tools = {"playwright", "selenium", "surefire", "allure", "playwrightallure", "restassured", "gradle", "internal"}
         tool_lower = tool.lower().replace("_", "").replace("-", "")
         if tool_lower in known_tools:
             # 301 redirect: /functional-test-report/allure → /functional-test-report/allure/
@@ -298,10 +298,13 @@ def create_migration_report_router(
         selenium_reports = os.path.join(clone_path, ".functional_tests", "selenium", "reports")
         report_dirs = {
             "playwright": os.path.join(clone_path, ".functional_tests", "playwright", "playwright-report"),
+            "playwrightallure": os.path.join(clone_path, ".functional_tests", "playwright", "allure-report"),
             "selenium": selenium_reports,
             "surefire": selenium_reports,
             "allure": os.path.join(selenium_reports, "allure-report"),
             "restassured": os.path.join(clone_path, ".functional_tests", "restassured", "target", "surefire-reports"),
+            "gradle": os.path.join(clone_path, ".functional_tests", "gradle"),
+            "internal": os.path.join(clone_path, ".functional_tests", "internal"),
         }
 
         tool_lower = tool.lower().replace("_", "").replace("-", "")
@@ -336,6 +339,10 @@ def create_migration_report_router(
             ".woff2": "font/woff2",
             ".ttf": "font/ttf",
             ".xml": "application/xml",
+            ".webm": "video/webm",
+            ".mp4": "video/mp4",
+            ".map": "application/json",
+            ".txt": "text/plain",
         }
         media_type = mime_map.get(ext, "application/octet-stream")
 

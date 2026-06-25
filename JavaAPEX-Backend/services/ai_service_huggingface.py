@@ -85,10 +85,10 @@ class SonarQubeLLMResult:
 
 
 class HuggingFaceAIService:
-    """AI Service using Groq API for code analysis (with HuggingFace fallback, replaces Ford LLM)."""
+    """AI Service using Ford LLM API for code analysis (with HuggingFace fallback)."""
     
     def __init__(self):
-        # Groq (primary, replaces Ford LLM)
+        # Ford LLM (primary)
         self.ford_llm_enabled = FORD_LLM_ENABLED
         self.ford_llm_api_endpoint = FORD_LLM_API_ENDPOINT
         self.ford_llm_api_key = FORD_LLM_API_KEY
@@ -107,22 +107,22 @@ class HuggingFaceAIService:
         )
         self.available = bool(self.ford_llm_enabled and self.ford_llm_api_key) or bool(self.api_key)
         if self.ford_llm_enabled and self.ford_llm_api_key:
-            logger.info("AI Service initialized with Groq (model=%s, replaces Ford LLM)", self.ford_llm_model)
+            logger.info("AI Service initialized with Ford LLM (model=%s)", self.ford_llm_model)
         else:
             logger.info(f"AI Service initialized with Hugging Face fallback (API Key: {'Configured' if self.api_key else 'Not Configured'})")
     
     async def query_huggingface(self, model_id: str, prompt: str, max_length: int = 1024) -> str:
-        """Query LLM API — routes through Groq first, falls back to HuggingFace."""
-        # ── Primary: Groq (replaces Ford LLM) ──
+        """Query LLM API — routes through Ford LLM first, falls back to HuggingFace."""
+        # ── Primary: Ford LLM ──
         if self.ford_llm_enabled and self.ford_llm_api_key:
             try:
                 return await self._query_ford_llm(prompt, max_length)
             except Exception as e:
-                logger.warning("Groq query failed, falling back to HuggingFace: %s", e)
+                logger.warning("Ford LLM query failed, falling back to HuggingFace: %s", e)
 
         # ── Fallback: HuggingFace ──
         if not self.api_key:
-            return "LLM API key not configured (neither Groq nor Hugging Face)"
+            return "LLM API key not configured (neither Ford LLM nor Hugging Face)"
         
         url = f"{self.api_url}/{model_id}"
         payload = {
@@ -152,11 +152,18 @@ class HuggingFaceAIService:
             return f"Error: {str(e)}"
 
     async def _query_ford_llm(self, prompt: str, max_tokens: int = 1024) -> str:
-        """Call Groq chat/completions endpoint (replaces Ford LLM)."""
+        """Call Ford LLM chat/completions endpoint directly."""
         import httpx
 
-        if not self.ford_llm_api_key:
-            raise ValueError("Groq API key not configured")
+        # Ensure fresh token via centralized token manager
+        try:
+            from services.token_manager import ford_token_manager
+            if ford_token_manager.is_configured:
+                fresh_token = ford_token_manager.ensure_fresh_token()
+                if fresh_token:
+                    self.ford_llm_api_key = fresh_token
+        except Exception:
+            pass
 
         headers = {
             "Authorization": f"Bearer {self.ford_llm_api_key}",
@@ -169,11 +176,17 @@ class HuggingFaceAIService:
             "max_tokens": max_tokens,
             "temperature": FORD_LLM_TEMPERATURE,
         }
+        if self.ford_llm_extra_models:
+            payload["extra_body"] = {"models": self.ford_llm_extra_models}
 
+        proxy = self.ford_llm_proxy_url or None
         async with httpx.AsyncClient(
             timeout=float(self.ford_llm_timeout),
+            **_proxy_kw(proxy),
+            verify=self.ford_llm_verify_ssl,
         ) as client:
             response = await client.post(self.ford_llm_api_endpoint, headers=headers, json=payload)
+            # Handle models that do not support custom temperature
             if response.status_code == 400 and "temperature" in (response.text or "").lower():
                 payload.pop("temperature", None)
                 logger.info("Model %s does not support custom temperature; retrying without it", self.ford_llm_model)

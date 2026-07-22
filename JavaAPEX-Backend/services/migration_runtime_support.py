@@ -504,6 +504,61 @@ def generate_testcase_doc_markdown(job: MigrationResult, clone_path: str) -> str
                 for path in generated_functional_files[:100]:
                     lines.append(f"  - `{path}`")
 
+            # MAPS-UI-style functional test-case table.
+            functional_cases = functional.get("test_cases") or []
+            if isinstance(functional_cases, list) and functional_cases:
+                def _md_escape(value: Any) -> str:
+                    text = str(value if value is not None else "").replace("|", "\\|")
+                    return " ".join(text.split())
+
+                lines.append("")
+                lines.append("#### Functional Test Cases (MAPS-UI Style)")
+                lines.append("")
+                lines.append(
+                    "| ID | Title | Precondition | Steps | Test Data | Expected Result | Pri | Type | Status |"
+                )
+                lines.append(
+                    "|----|-------|--------------|-------|-----------|-----------------|-----|------|--------|"
+                )
+                for idx, case in enumerate(functional_cases[:200], start=1):
+                    if not isinstance(case, dict):
+                        continue
+                    target = case.get("path") or case.get("route") or case.get("schema") or ""
+                    method = str(case.get("method") or "").strip()
+                    test_id = case.get("test_id") or f"TC-{idx:02d}"
+                    title = case.get("title") or case.get("name") or "Generated functional test"
+                    precondition = case.get("precondition") or "Application deployed and running"
+                    steps_val = case.get("steps")
+                    if isinstance(steps_val, list) and steps_val:
+                        steps = "<br>".join(f"{i}. {_md_escape(s)}" for i, s in enumerate(steps_val[:8], start=1))
+                    else:
+                        steps = _md_escape(f"{method} {target}".strip() or title)
+                    test_data = case.get("test_data") or (f"{method} {target}".strip() or "—")
+                    expected_result = case.get("expected_result") or (
+                        f"HTTP {case.get('expectedStatus')} response returned"
+                        if case.get("expectedStatus") is not None
+                        else "Completes successfully"
+                    )
+                    priority = case.get("priority") or "P2"
+                    type_sign = case.get("type_sign") or "+"
+                    status = case.get("status") or "generated"
+                    lines.append(
+                        "| {id} | {title} | {pre} | {steps} | {data} | {exp} | {pri} | {typ} | {status} |".format(
+                            id=_md_escape(test_id),
+                            title=_md_escape(title),
+                            pre=_md_escape(precondition),
+                            steps=steps,
+                            data=_md_escape(test_data),
+                            exp=_md_escape(expected_result),
+                            pri=_md_escape(priority),
+                            typ=_md_escape(type_sign),
+                            status=_md_escape(status),
+                        )
+                    )
+                if len(functional_cases) > 200:
+                    lines.append("")
+                    lines.append(f"_Showing 200 of {len(functional_cases)} functional test cases._")
+
         if test_pipeline.manual_test_plan_path and os.path.exists(test_pipeline.manual_test_plan_path):
             try:
                 plan_text = Path(test_pipeline.manual_test_plan_path).read_text(encoding="utf-8", errors="ignore")

@@ -284,6 +284,7 @@ class MigrationResult(BaseModel):
     test_insights: List[str] = Field(default_factory=list)
     test_llm_model: Optional[str] = None
     test_pipeline: Optional[TestPipelineReport] = None
+    migration_validation: Optional[Dict[str, Any]] = None
     baseline_dependency_report: Optional[Dict[str, Any]] = None
     dependency_validation_report: Optional[Dict[str, Any]] = None
     fossa_policy_status: Optional[str] = None

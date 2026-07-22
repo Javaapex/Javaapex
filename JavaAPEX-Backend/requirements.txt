@@ -22,3 +22,10 @@ reportlab==4.4.1
 redis<=5.0.0
 celery>=5.4,<6
 psycopg2-binary>=2.9,<3
+
+# Functional testing — offline Python Selenium runner.
+# Drives Microsoft Edge (or Chrome) directly from Python so migrated projects
+# get real per-page screenshots, an offline journey video and an HTML report
+# even on locked-down machines with no Maven / Docker / JDK. Selenium 4 ships
+# Selenium Manager, which resolves the browser driver automatically.
+selenium>=4.15,<5

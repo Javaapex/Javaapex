@@ -273,7 +273,7 @@ def create_migration_report_router(
         request: Request,
     ):
         """Redirect bare tool URL to trailing-slash so relative assets in Allure/Playwright resolve correctly."""
-        known_tools = {"playwright", "selenium", "surefire", "allure", "playwrightallure", "restassured", "gradle", "internal"}
+        known_tools = {"playwright", "selenium", "surefire", "allure", "playwrightallure", "restassured", "gradle", "internal", "velocity", "velocityallure"}
         tool_lower = tool.lower().replace("_", "").replace("-", "")
         if tool_lower in known_tools:
             # 301 redirect: /functional-test-report/allure → /functional-test-report/allure/
@@ -296,12 +296,15 @@ def create_migration_report_router(
 
         # Map tool name → report directory inside .functional_tests/
         selenium_reports = os.path.join(clone_path, ".functional_tests", "selenium", "reports")
+        velocity_reports = os.path.join(clone_path, ".functional_tests", "velocity", "reports")
         report_dirs = {
             "playwright": os.path.join(clone_path, ".functional_tests", "playwright", "playwright-report"),
             "playwrightallure": os.path.join(clone_path, ".functional_tests", "playwright", "allure-report"),
             "selenium": selenium_reports,
             "surefire": selenium_reports,
             "allure": os.path.join(selenium_reports, "allure-report"),
+            "velocity": velocity_reports,
+            "velocityallure": os.path.join(velocity_reports, "allure-report"),
             "restassured": os.path.join(clone_path, ".functional_tests", "restassured", "target", "surefire-reports"),
             "gradle": os.path.join(clone_path, ".functional_tests", "gradle"),
             "internal": os.path.join(clone_path, ".functional_tests", "internal"),

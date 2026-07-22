@@ -112,6 +112,20 @@ _coverage_job_ttl_seconds = max(60, int(os.getenv("JACOCO_COVERAGE_JOB_TTL_SEC",
 _coverage_job_max_entries = max(4, int(os.getenv("JACOCO_COVERAGE_JOB_MAX_ENTRIES", "24")))
 _coverage_job_log_max_lines = max(50, int(os.getenv("JACOCO_COVERAGE_JOB_LOG_MAX_LINES", "400")))
 
+# Skip the (slow, rate-limited) LLM for trivial auto-generated class types and use
+# the deterministic regex generators instead. These types (JAXB DTOs like the
+# `ArrayOf*` wrappers, JAXB ObjectFactory, enums, constants classes) have no
+# business logic, so the regex tests are equivalent in JaCoCo coverage but MUCH
+# faster and free of Ford LLM spend/rate limits. Set to "false" to force LLM on all.
+_jacoco_llm_skip_trivial = (os.getenv("JACOCO_LLM_SKIP_TRIVIAL_TYPES", "true").strip().lower()
+                            in {"1", "true", "yes", "on"})
+_JACOCO_TRIVIAL_TYPES = {
+    JavaClassType.JAXB_TYPE,
+    JavaClassType.OBJECT_FACTORY,
+    JavaClassType.ENUM,
+    JavaClassType.CONSTANTS,
+}
+
 
 def _coverage_job_timestamp(job: CoverageJob) -> float:
     raw_value = job.completed_at or job.started_at or ""
@@ -2150,8 +2164,14 @@ async def run_jacoco_coverage_pipeline(
 
             test_code = None
 
-            # Try LLM first
-            if use_llm:
+            # Trivial auto-generated types (JAXB DTOs, ObjectFactory, enums, constants)
+            # have no business logic — the deterministic regex generator produces
+            # equivalent JaCoCo coverage instantly, without a slow LLM round-trip or
+            # burning Ford LLM spend/rate limits. Route them straight to regex.
+            is_trivial = _jacoco_llm_skip_trivial and info.class_type in _JACOCO_TRIVIAL_TYPES
+
+            # Try LLM first (skipped for trivial types)
+            if use_llm and not is_trivial:
                 try:
                     test_code = await generate_test_llm(info, llm_model)
                     if test_code:
@@ -2159,10 +2179,14 @@ async def run_jacoco_coverage_pipeline(
                 except Exception as e:
                     _cov_log(job, f"    ⚠️  LLM failed for {info.class_name}: {e}")
 
-            # Fallback to regex
+            # Regex generation — the guaranteed path for trivial types and the
+            # fallback for everything else.
             if not test_code:
                 test_code = generate_test_regex(info)
-                if use_llm:
+                if is_trivial:
+                    if idx % 25 == 0:  # Keep the log readable for large JAXB batches
+                        _cov_log(job, f"    ⚡ Regex (trivial {info.class_type}): {info.class_name} ({idx+1}/{len(need_test)})")
+                elif use_llm:
                     _cov_log(job, f"    📐 Regex fallback: {info.class_name} ({info.class_type})")
                 else:
                     if idx % 50 == 0:  # Log every 50th for speed

@@ -79,18 +79,24 @@ export default function FunctionalTestPanel({
     isAutoMode ? tool.active : selectedToolIds.includes(tool.id);
 
   // Map detected existing-test categories to the tool that would otherwise generate them.
-  // Modern E2E / spec files map to Playwright; Spring MockMvc tests map to MockMvc.
-  // Selenium has no generic fingerprint, so it is never auto-flagged.
+  // Modern E2E / spec files map to the UI tool (Selenium); Spring MockMvc tests map to MockMvc.
   const toolHasExistingTests = (id: string): boolean => {
     if (!counts) return false;
     if (id === "MOCK_MVC") return counts.mockMvc > 0;
-    if (id === "PLAYWRIGHT") return counts.e2e > 0 || counts.testFramework > 0;
+    if (id === "SELENIUM") return counts.e2e > 0 || counts.testFramework > 0;
     return false;
   };
 
   const cautionTools = tools
     .filter((t) => isToolSelected(t) && toolHasExistingTests(t.id))
     .map((t) => t.id);
+
+  // Only show tools the analyzer recommends for THIS project: anything currently
+  // selected, plus high-confidence ("Highly Recommended") matches. Low Match /
+  // Not Applicable tools are hidden. Fall back to the full list only if nothing
+  // qualifies, so the panel is never empty.
+  const recommendedTools = tools.filter((t) => isToolSelected(t) || t.confidence >= 70);
+  const visibleTools = recommendedTools.length > 0 ? recommendedTools : tools;
 
   const countBadges = counts
     ? [
@@ -217,7 +223,7 @@ export default function FunctionalTestPanel({
           gap: 16,
         }}
       >
-        {tools.map((tool) => {
+        {visibleTools.map((tool) => {
           const selected = isToolSelected(tool);
           const isActive = tool.active;
           const hovered = hoveredToolId === tool.id;

@@ -5,6 +5,7 @@ Handles OAuth2 token refresh and proxy configuration for Ford's internal network
 """
 import asyncio
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -57,6 +58,9 @@ class FordLLMService:
         # OAuth2 token cache
         self._oauth_token: Optional[str] = None
         self._oauth_token_expiry: float = 0.0
+        # Rate-limit cooldowns: model name -> epoch time (seconds) until which the
+        # model should be skipped. Prevents hammering a model that hit its spend cap.
+        self._model_cooldowns: Dict[str, float] = {}
 
         if self.enabled:
             logger.info(
@@ -120,6 +124,45 @@ class FordLLMService:
             "Accept": "application/json",
         }
 
+    def _cooldown_remaining(self, model: str) -> float:
+        """Return remaining cooldown seconds for a model (0.0 if it is ready)."""
+        until = self._model_cooldowns.get(model, 0.0)
+        remaining = until - time.time()
+        if remaining <= 0:
+            self._model_cooldowns.pop(model, None)
+            return 0.0
+        return remaining
+
+    def _mark_cooldown(self, model: str, seconds: float) -> None:
+        """Mark a model as rate-limited so it is skipped for ``seconds`` seconds."""
+        seconds = max(1.0, min(seconds, 600.0))
+        self._model_cooldowns[model] = time.time() + seconds
+        logger.warning(
+            "Ford LLM: model %s hit its rate/spend cap — cooling down for %.0fs "
+            "(rotating to fallback models until then)",
+            model, seconds,
+        )
+
+    @staticmethod
+    def _parse_retry_after(response: httpx.Response, body_text: str) -> float:
+        """Best-effort parse of how long to back off after a 429 response."""
+        # 1) Standard Retry-After header (in seconds)
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+        # 2) Ford message pattern e.g. "limited to $5 per 600 seconds"
+        match = re.search(r"per\s+(\d+)\s+seconds", body_text or "")
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+        # 3) Default: short cooldown so we rotate but recover reasonably fast
+        return 60.0
+
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -133,13 +176,31 @@ class FordLLMService:
 
         Tries the primary model first; on empty response or hard failure,
         falls through each model in ``self.fallback_models`` before raising.
+        Models that hit their spend/rate cap (HTTP 429) are put on a temporary
+        cooldown and skipped so we don't keep hammering a limited model.
         """
         if not self.enabled:
             raise ValueError("Ford LLM Service is disabled.")
 
-        # Build ordered list: explicit model (or primary) → fallback models
+        # Build ordered, de-duplicated list: explicit model (or primary) → fallbacks
         primary = model or self.model
-        models_to_try = [primary] + [m for m in self.fallback_models if m != primary]
+        ordered = [primary] + [m for m in self.fallback_models if m != primary]
+        seen: set = set()
+        models_to_try = [m for m in ordered if not (m in seen or seen.add(m))]
+
+        # Try models that are NOT in cooldown first; keep cooling ones as last resort.
+        ready = [m for m in models_to_try if self._cooldown_remaining(m) <= 0]
+        cooling = [m for m in models_to_try if self._cooldown_remaining(m) > 0]
+        if not ready and cooling:
+            # Everything is rate-limited — wait (bounded) for the soonest one to free up.
+            wait = min(self._cooldown_remaining(m) for m in cooling)
+            wait = max(1.0, min(wait, 30.0))
+            logger.warning(
+                "Ford LLM: all models in cooldown; waiting %.0fs before retrying %s",
+                wait, cooling[0],
+            )
+            await asyncio.sleep(wait)
+        models_to_try = ready + cooling
 
         last_exc: Optional[Exception] = None
         for idx, try_model in enumerate(models_to_try):
@@ -202,9 +263,15 @@ class FordLLMService:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        # Ford LLM gateway uses extra_body for model routing
+        # Ford LLM gateway uses extra_body.models for routing. Put the CURRENT model
+        # FIRST and drop any model that is on cooldown, so the gateway does NOT route
+        # back to a rate-limited model (which would defeat our fallback rotation).
         if self.extra_models:
-            payload["extra_body"] = {"models": self.extra_models}
+            routing = [model] + [
+                m for m in self.extra_models
+                if m != model and self._cooldown_remaining(m) <= 0
+            ]
+            payload["extra_body"] = {"models": routing}
 
         proxy = self.proxy_url or None
         last_exc: Optional[Exception] = None
@@ -262,11 +329,19 @@ class FordLLMService:
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
                 status = exc.response.status_code
+                body_text = exc.response.text or ""
                 logger.warning(
                     "Ford LLM [%s] attempt %d/%d failed (HTTP %d): %s",
-                    model, attempt, self.max_retries, status, exc.response.text[:300],
+                    model, attempt, self.max_retries, status, body_text[:300],
                 )
-                if status in (504, 502, 503, 429):
+                if status == 429:
+                    # Spend/rate cap — retrying the SAME model won't help until the
+                    # window resets (up to several minutes). Put it on cooldown and
+                    # raise so chat_completion() rotates to the next fallback model.
+                    self._mark_cooldown(model, self._parse_retry_after(exc.response, body_text))
+                    raise
+                if status in (504, 502, 503):
+                    # Transient gateway errors — worth a short backoff + retry.
                     await asyncio.sleep(min(2 ** attempt, 10))
                     continue
                 raise

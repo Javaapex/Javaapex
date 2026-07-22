@@ -55,20 +55,27 @@ def _run_case(
     installed: dict[int, str],
     source_compat: str | None,
     expect_major: int,
+    provision: tuple[str, int] | None = None,
 ) -> bool:
     proj = _make_project(gradle_version, source_compat=source_compat)
     ov_home = installed[override_major]
 
     # Patch the discovery functions for a deterministic, machine-independent test.
+    # ``_provision_compatible_jdk`` is patched too so the outcome never depends on
+    # a real JDK download or a pre-existing ``~/.javaapex/jdk-cache`` on the host:
+    # ``provision`` controls whether a compatible JDK can be provisioned.
     orig_installed = ge.detect_installed_jdks
     orig_override = ge._build_jdk_override
+    orig_provision = ge._provision_compatible_jdk
     ge.detect_installed_jdks = lambda: dict(installed)  # type: ignore[assignment]
     ge._build_jdk_override = lambda: (ov_home, override_major, True)  # type: ignore[assignment]
+    ge._provision_compatible_jdk = lambda *a, **k: (provision or (None, None))  # type: ignore[assignment]
     try:
         java_home, chosen, project_java = ge.resolve_build_jdk(proj)
     finally:
         ge.detect_installed_jdks = orig_installed  # type: ignore[assignment]
         ge._build_jdk_override = orig_override  # type: ignore[assignment]
+        ge._provision_compatible_jdk = orig_provision  # type: ignore[assignment]
 
     ok = chosen == expect_major
     status = "PASS" if ok else "FAIL"
@@ -86,6 +93,7 @@ def main() -> int:
     jdk8 = _fake_jdk(8)
     jdk11 = _fake_jdk(11)
     jdk21 = _fake_jdk(21)
+    prov_jdk11 = _fake_jdk(11)  # stands in for a freshly provisioned/cached JDK 11
 
     results = []
 
@@ -109,14 +117,28 @@ def main() -> int:
         expect_major=8,  # sourceCompatibility 1.8 -> exact match JDK 8
     ))
 
-    # 3. Gradle 6.3 + pinned JDK 21, only JDK 21 installed -> keep JDK 21 (wrapper upgrade path).
+    # 3. Gradle 6.3 + pinned JDK 21, only JDK 21 installed, provisioning AVAILABLE
+    #    -> provision a compatible JDK 11 rather than crashing old Gradle on JDK 21.
     results.append(_run_case(
-        "Gradle 6.3 + pinned JDK21, no compatible JDK -> keep JDK 21",
+        "Gradle 6.3 + pinned JDK21, no compatible JDK -> provisions JDK 11",
+        gradle_version="6.3",
+        override_major=21,
+        installed={21: jdk21},
+        source_compat=None,
+        expect_major=11,
+        provision=(prov_jdk11, 11),
+    ))
+
+    # 3b. Same, but provisioning UNAVAILABLE (e.g. offline) -> keep JDK 21 and rely
+    #     on a Gradle wrapper upgrade to launch on it.
+    results.append(_run_case(
+        "Gradle 6.3 + pinned JDK21, no compatible JDK & offline -> keep JDK 21",
         gradle_version="6.3",
         override_major=21,
         installed={21: jdk21},
         source_compat=None,
         expect_major=21,
+        provision=None,
     ))
 
     # 4. Modern: Gradle 8.5 + pinned JDK 21 -> keep JDK 21 (compatible).

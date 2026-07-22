@@ -1420,8 +1420,8 @@ export function MigrationUnitTestSection({
                             </span>
                           )}
                         </div>
-                        {(runner.report_available || runner.allure_report_available) && migrationJob.job_id && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        {(runner.report_available || runner.allure_report_available || runner.video_available || runner.journey_video_available) && migrationJob.job_id && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
                             {runner.report_available && (
                               <a
                                 href={getFunctionalTestReportUrl(migrationJob.job_id, runner.report_tool || runner.tool)}
@@ -1482,6 +1482,37 @@ export function MigrationUnitTestSection({
                                 🔬 View Allure Report
                               </a>
                             )}
+                            {(runner.journey_video_available || runner.video_available) && (
+                              <a
+                                href={`${getFunctionalTestReportUrl(migrationJob.job_id, String(runner.tool || "").toUpperCase().includes("VELOCITY") ? "velocity" : "selenium")}/journey-video.html`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Watch every tested page captured as a frame-by-frame video"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "6px 14px",
+                                  borderRadius: 8,
+                                  background: "#0f766e",
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                  boxShadow: "0 2px 8px rgba(15, 118, 110, 0.18)",
+                                  transition: "all 0.15s ease",
+                                  flexShrink: 0,
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.background = "#0d655e";
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.background = "#0f766e";
+                                }}
+                              >
+                                🎬 View Page-by-Page Video
+                              </a>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1492,80 +1523,113 @@ export function MigrationUnitTestSection({
             )}
             {functionalTestCases.length > 0 && (
               <div style={{ marginTop: 14 }}>
-                <strong>Functional test cases:</strong>
-                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                  {functionalTestCases.slice(0, 20).map((testCase, index) => {
-                    const target = testCase.path || testCase.route || testCase.schema || "-";
-                    const method = testCase.method ? `${testCase.method} ` : "";
-                    const expected = testCase.expectedStatus ? ` · ${testCase.expectedStatus}` : "";
-                    const status = testCase.status || "generated";
+                <strong>Functional test cases (MAPS-UI style):</strong>
+                <div style={{ overflowX: "auto", marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "#0f766e", color: "#fff", textAlign: "left" }}>
+                        <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>ID</th>
+                        <th style={{ padding: "8px 10px", minWidth: 160 }}>Title</th>
+                        <th style={{ padding: "8px 10px", minWidth: 150 }}>Precondition</th>
+                        <th style={{ padding: "8px 10px", minWidth: 200 }}>Steps</th>
+                        <th style={{ padding: "8px 10px", minWidth: 120 }}>Test Data</th>
+                        <th style={{ padding: "8px 10px", minWidth: 200 }}>Expected Result</th>
+                        <th style={{ padding: "8px 10px", textAlign: "center" }}>Pri</th>
+                        <th style={{ padding: "8px 10px", textAlign: "center" }}>Type</th>
+                        <th style={{ padding: "8px 10px", textAlign: "center" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {functionalTestCases.slice(0, 50).map((testCase, index) => {
+                        const target = testCase.path || testCase.route || testCase.schema || "-";
+                        const method = testCase.method ? `${testCase.method} ` : "";
+                        const status = testCase.status || "generated";
+                        const typeSign = testCase.type_sign || "+";
+                        const priority = testCase.priority || "P2";
+                        const steps: string[] = Array.isArray(testCase.steps) && testCase.steps.length > 0
+                          ? testCase.steps
+                          : [`${method}${target}`.trim() || testCase.name || "Run test"];
+                        const testId = testCase.test_id || `TC-${String(index + 1).padStart(2, "0")}`;
+                        const title = testCase.title || testCase.name || "Generated functional test";
+                        const precondition = testCase.precondition || "Application deployed and running";
+                        const testData = testCase.test_data || `${method}${target}`.trim() || "—";
+                        const expectedResult =
+                          testCase.expected_result ||
+                          (testCase.expectedStatus ? `HTTP ${testCase.expectedStatus} response returned` : "Completes successfully");
 
-                    let badgeBg = "#f1f5f9";
-                    let badgeColor = "#475569";
-                    let badgeBorder = "#e2e8f0";
-                    const badgeText = status.toUpperCase();
+                        let badgeBg = "#f1f5f9";
+                        let badgeColor = "#475569";
+                        let badgeBorder = "#e2e8f0";
+                        if (status === "passed") {
+                          badgeBg = "#dcfce7";
+                          badgeColor = "#166534";
+                          badgeBorder = "#bbf7d0";
+                        } else if (status === "failed") {
+                          badgeBg = "#fee2e2";
+                          badgeColor = "#991b1b";
+                          badgeBorder = "#fca5a5";
+                        }
 
-                    if (status === "passed") {
-                      badgeBg = "#dcfce7";
-                      badgeColor = "#166534";
-                      badgeBorder = "#bbf7d0";
-                    } else if (status === "failed") {
-                      badgeBg = "#fee2e2";
-                      badgeColor = "#991b1b";
-                      badgeBorder = "#fca5a5";
-                    }
+                        const priColor = priority === "P1" ? "#dc2626" : priority === "P3" ? "#64748b" : "#d97706";
+                        const typeColor = typeSign === "-" ? "#dc2626" : "#16a34a";
 
-                    return (
-                      <div
-                        key={`functional-test-case-${index}`}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(120px, 150px) minmax(100px, 130px) 100px 1fr",
-                          gap: 10,
-                          padding: "10px 12px",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 8,
-                          background: "#fff",
-                          alignItems: "center",
-                        }}
-                      >
-                        <span style={{ fontWeight: 800, color: "#0f172a" }}>{testCase.tool || "Tool"}</span>
-                        <span style={{ color: "#475569" }}>{testCase.type || "functional"}</span>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            padding: "4px 8px",
-                            borderRadius: 6,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            textAlign: "center",
-                            background: badgeBg,
-                            color: badgeColor,
-                            border: `1px solid ${badgeBorder}`,
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {badgeText}
-                        </span>
-                        <span style={{ color: "#334155", display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span>
-                            {testCase.name || "Generated functional test"} · {method}
-                            {target}
-                            {expected}
-                          </span>
-                          {testCase.validation_reason && (
-                            <span style={{ fontSize: 11, color: status === "passed" ? "#16a34a" : "#dc2626", fontStyle: "italic" }}>
-                              {testCase.validation_reason}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    );
-                  })}
+                        return (
+                          <tr
+                            key={`functional-test-case-${index}`}
+                            style={{ borderTop: "1px solid #e2e8f0", background: index % 2 ? "#f8fafc" : "#fff", verticalAlign: "top" }}
+                          >
+                            <td style={{ padding: "8px 10px", fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>{testId}</td>
+                            <td style={{ padding: "8px 10px", color: "#0f172a" }}>
+                              {title}
+                              {testCase.tool && (
+                                <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>{testCase.tool}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#334155" }}>{precondition}</td>
+                            <td style={{ padding: "8px 10px", color: "#334155" }}>
+                              <ol style={{ margin: 0, paddingLeft: 16 }}>
+                                {steps.slice(0, 6).map((s, i) => (
+                                  <li key={`step-${index}-${i}`}>{s}</li>
+                                ))}
+                              </ol>
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#334155", fontFamily: "monospace", fontSize: 11 }}>{testData}</td>
+                            <td style={{ padding: "8px 10px", color: "#334155" }}>
+                              {expectedResult}
+                              {testCase.validation_reason && (
+                                <div style={{ fontSize: 11, color: status === "passed" ? "#16a34a" : "#dc2626", fontStyle: "italic", marginTop: 2 }}>
+                                  {testCase.validation_reason}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700, color: priColor }}>{priority}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 800, color: typeColor }}>{typeSign}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  padding: "3px 7px",
+                                  borderRadius: 6,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  background: badgeBg,
+                                  color: badgeColor,
+                                  border: `1px solid ${badgeBorder}`,
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                {status.toUpperCase()}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                {functionalTestCases.length > 20 && (
+                {functionalTestCases.length > 50 && (
                   <div style={{ marginTop: 8, color: "#64748b" }}>
-                    Showing 20 of {functionalTestCases.length} generated functional test cases.
+                    Showing 50 of {functionalTestCases.length} generated functional test cases.
                   </div>
                 )}
               </div>

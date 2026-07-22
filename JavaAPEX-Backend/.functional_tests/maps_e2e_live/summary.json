@@ -1,0 +1,138 @@
+{
+  "base_url": "http://localhost:49877",
+  "serving_dir": "C:\\Users\\KARUNAC4\\Downloads\\Functional_Testing\\Javaapex\\maps-ui-gcp-bq-main\\maps-ui-gcp-bq-main\\MAPSWAR\\src\\main\\webapp",
+  "total": 8,
+  "passed": 8,
+  "failed": 0,
+  "distinct_pages": 8,
+  "results": [
+    {
+      "step": 1,
+      "label": "Home / Launch",
+      "route": "/index.html",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 3525,
+      "screenshot": "01_Home__Launch.png",
+      "title": "MAPS Application Launcher",
+      "body_len": 120,
+      "passed": true
+    },
+    {
+      "step": 2,
+      "label": "Splash Page",
+      "route": "/MAPSWAR/MAPS?_page=SplashPage",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 1023,
+      "screenshot": "02_Splash_Page.png",
+      "title": "MAPS ~ Splash Page",
+      "body_len": 984,
+      "passed": true
+    },
+    {
+      "step": 3,
+      "label": "Preference Page",
+      "route": "/MAPSWAR/MAPS?_page=PreferencePage",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 2313,
+      "screenshot": "03_Preference_Page.png",
+      "title": "MAPS ~ Set Preference",
+      "body_len": 840,
+      "passed": true
+    },
+    {
+      "step": 4,
+      "label": "Report Page",
+      "route": "/MAPSWAR/MAPS?_page=ReportPage",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 2467,
+      "screenshot": "04_Report_Page.png",
+      "title": "MAPS ~ Reports",
+      "body_len": 859,
+      "passed": true
+    },
+    {
+      "step": 5,
+      "label": "Support Page",
+      "route": "/MAPSWAR/MAPS?_page=SupportPage",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 1088,
+      "screenshot": "05_Support_Page.png",
+      "title": "MAPS ~ Support Page",
+      "body_len": 156,
+      "passed": true
+    },
+    {
+      "step": 6,
+      "label": "Custom Org Page",
+      "route": "/MAPSWAR/MAPS?_page=CustomOrgPage",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 3255,
+      "screenshot": "06_Custom_Org_Page.png",
+      "title": "MAPS ~ Maintain Custom Organizations",
+      "body_len": 1116,
+      "passed": true
+    },
+    {
+      "step": 7,
+      "label": "Health Check",
+      "route": "/health",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 728,
+      "screenshot": "07_Health_Check.png",
+      "title": "Health",
+      "body_len": 536,
+      "passed": true
+    },
+    {
+      "step": 8,
+      "label": "General Exception",
+      "route": "/MAPSWAR/MAPS?_page=GeneralException",
+      "checks": {
+        "title_nonempty": true,
+        "body_has_text": true,
+        "no_raw_velocity": true,
+        "distinct_page": true
+      },
+      "load_ms": 1073,
+      "screenshot": "08_General_Exception.png",
+      "title": "MAPS ~ ERROR",
+      "body_len": 802,
+      "passed": true
+    }
+  ]
+}

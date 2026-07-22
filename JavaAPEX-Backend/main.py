@@ -1045,6 +1045,8 @@ def _ui_framework_label(route_info: Any) -> str:
         return "SPA"
     if page_type == "jsp" or source.endswith(".jsp"):
         return "JSP"
+    if page_type in ("velocity", "vm") or source.endswith((".vm", ".vhtml", ".vsl")):
+        return "Velocity"
     if page_type in ("html", "template") or source.endswith(".html"):
         return "HTML"
     return "Web"
@@ -12822,7 +12824,7 @@ if __name__ == "__main__":
         app,
         host=APP_HOST,
         port=APP_PORT,
-        limit_concurrency=10,
+        limit_concurrency=200,
         limit_max_requests=None,
         timeout_keep_alive=300,
         timeout_graceful_shutdown=30,

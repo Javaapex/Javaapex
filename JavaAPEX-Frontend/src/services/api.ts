@@ -512,12 +512,22 @@ export interface MigrationResult {
         method?: string;
         path?: string;
         route?: string;
+        route_type?: string;
         schema?: string;
         expectedStatus?: number;
         status?: string;
         validation_reason?: string;
         source_file?: string;
         controller?: string;
+        // MAPS-UI-style rich metadata
+        test_id?: string;
+        title?: string;
+        precondition?: string;
+        steps?: string[];
+        test_data?: string;
+        expected_result?: string;
+        priority?: string;
+        type_sign?: string;
       }>;
       planning?: Record<string, unknown>;
       total_tests?: number;

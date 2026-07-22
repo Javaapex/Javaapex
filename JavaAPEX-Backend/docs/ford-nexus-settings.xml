@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ford JavaAPEX — templated ~/.m2/settings.xml for a locked-down corporate box
+  where public Maven Central (https://repo.maven.apache.org/maven2) is firewalled.
+
+  HOW TO USE
+  ----------
+  1. Replace the placeholder mirror URL below with your team's real internal
+     Nexus/Artifactory URL (ask your build/DevOps channel). The URL is the ONLY
+     thing you must edit.
+  2. Copy this file to  %USERPROFILE%\.m2\settings.xml   (Windows)
+     or                 ~/.m2/settings.xml               (macOS/Linux).
+  3. If your Nexus requires auth, fill in the <server> block and reference it
+     from the <mirror> via matching <id> values.
+
+  This makes EVERY artifact request (central, plugins, etc.) route through the
+  single internal mirror, which is the supported pattern behind a corporate
+  firewall.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <!-- Optional: keep the local repo under the user profile (no admin needed). -->
+  <!-- <localRepository>${user.home}/.m2/repository</localRepository> -->
+
+  <servers>
+    <!-- Uncomment and fill in if the internal mirror needs credentials. -->
+    <!--
+    <server>
+      <id>ford-internal-nexus</id>
+      <username>REPLACE_WITH_USERNAME</username>
+      <password>REPLACE_WITH_ENCRYPTED_PASSWORD</password>
+    </server>
+    -->
+  </servers>
+
+  <mirrors>
+    <mirror>
+      <id>ford-internal-nexus</id>
+      <name>Ford Internal Nexus/Artifactory Mirror</name>
+      <!-- ============================================================= -->
+      <!-- >>> REPLACE THIS PLACEHOLDER with your real internal URL <<<  -->
+      <url>https://REPLACE-ME.nexus.internal.ford.com/repository/maven-public/</url>
+      <!-- ============================================================= -->
+      <!-- Route ALL repos through this mirror (external + plugin repos). -->
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
+
+  <profiles>
+    <profile>
+      <id>ford-defaults</id>
+      <repositories>
+        <repository>
+          <id>ford-internal-nexus</id>
+          <url>https://REPLACE-ME.nexus.internal.ford.com/repository/maven-public/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>ford-internal-nexus</id>
+          <url>https://REPLACE-ME.nexus.internal.ford.com/repository/maven-public/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>ford-defaults</activeProfile>
+  </activeProfiles>
+</settings>

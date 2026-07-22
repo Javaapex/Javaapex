@@ -1007,10 +1007,10 @@ export default function MigrationWizard() {
     );
   }, []);
 
-  // Functional test execution mode: "auto" | "external" | "internal"
-  const [functionalTestExecutionMode, setFunctionalTestExecutionMode] = useState<string>(
-    persistedFormState?.functionalTestExecutionMode ?? "auto"
-  );
+  // Functional test execution mode: always "external" — the app is built,
+  // started on a dynamic port, and real Playwright/RestAssured/Selenium runners
+  // execute against the live app. The selector is hidden in the UI.
+  const [functionalTestExecutionMode, setFunctionalTestExecutionMode] = useState<string>("external");
 
   const functionalTestingTools = useMemo(() => {
     const endpointCount = repoAnalysis?.api_endpoints?.length ?? 0;
@@ -1036,6 +1036,9 @@ export default function MigrationWizard() {
     );
     const hasThymeleaf = depArtifacts.some(a => a.includes("thymeleaf"));
     const hasJsp = depArtifacts.some(a => a.includes("jsp") || a.includes("jstl") || a.includes("servlet"));
+    const hasVelocity = depArtifacts.some(a =>
+      a.includes("velocity") || a.includes("velocity-engine") || a.includes("velocity-tools")
+    );
 
     const allFiles: string[] = ((repoAnalysis as any)?.all_files ?? []).map((f: any) =>
       (typeof f === "string" ? f : (f?.path || "")).toLowerCase()
@@ -1047,7 +1050,12 @@ export default function MigrationWizard() {
     const hasWebXml = allFiles.some(p => p.endsWith("web.xml"));
     const hasJspFiles = allFiles.some(p => p.endsWith(".jsp") || p.endsWith(".jspx"));
     const hasHtmlTemplates = allFiles.some(p => p.endsWith(".html") && (p.includes("/templates/") || p.includes("/webapp/")));
-    const hasUI = hasStaticAssets || hasThymeleaf || hasJspFiles || hasHtmlTemplates || hasWebXml;
+    // Apache Velocity templates (`.vm`) — legacy Front-Controller apps (e.g. MAPS)
+    // render every page from a `.vm` template, so this must count as UI even when
+    // there is no JSP/HTML/Thymeleaf and no Velocity dependency is declared.
+    const hasVmFiles = allFiles.some(p => p.endsWith(".vm") || p.endsWith(".vhtml") || p.endsWith(".vsl"));
+    const hasVelocityUI = hasVelocity || hasVmFiles;
+    const hasUI = hasStaticAssets || hasThymeleaf || hasJspFiles || hasHtmlTemplates || hasVelocityUI || hasWebXml;
 
     const hasOpenApiFile = allFiles.some(p =>
       p.includes("openapi") || p.includes("swagger") || p.endsWith("api-docs.json") || p.endsWith("api-docs.yaml")
@@ -1055,28 +1063,14 @@ export default function MigrationWizard() {
     const hasSpringDoc = depArtifacts.some(a => a.includes("springdoc") || a.includes("springfox") || a.includes("swagger"));
     const _hasOpenApi = hasOpenApiFile || hasSpringDoc;
 
-    // ── Playwright confidence ──
-    let playwrightConf = 5;
-    if (hasUI) {
-      playwrightConf = 72;
-      if (hasThymeleaf || hasHtmlTemplates) playwrightConf += 10;
-      if (hasStaticAssets) playwrightConf += 6;
-      if (hasJspFiles) playwrightConf += 4;
-    } else if (hasSrcMain && hasJsp) {
-      playwrightConf = 38;
-    } else if (hasSrcMain) {
-      playwrightConf = 12;
-    }
-    playwrightConf = Math.min(playwrightConf, 97);
-
-    const playwrightTag = playwrightConf >= 70 ? "Highly Recommended"
-      : playwrightConf >= 35 ? "Potential Fit"
-      : "Not Detected";
-    const playwrightReason = playwrightConf >= 70
-      ? `Highly Recommended: Detected ${[hasThymeleaf && "Thymeleaf templates", hasJspFiles && "JSP pages", hasHtmlTemplates && "HTML templates", hasStaticAssets && "static assets"].filter(Boolean).join(", ") || "UI assets"} in project.`
-      : playwrightConf >= 35
-        ? "Potential Fit: Some web resources found but no strong UI framework detected."
-        : "Not Detected: No web UI assets or templating engine found in this project.";
+    // ── Playwright confidence (DEPRECATED) ──
+    // Playwright has been retired from this pipeline in favour of Selenium for UI
+    // testing: Selenium produces the per-page screenshots + video the report needs
+    // and matches the backend's Selenium-only execution. Keep the variables defined
+    // so the card object still compiles, but force it inactive/hidden.
+    const playwrightConf = 0;
+    const playwrightTag = "Deprecated";
+    const playwrightReason = "Deprecated: Selenium is now the standard UI testing tool for this project.";
 
     // ── Rest Assured confidence ──
     let restAssuredConf = 5;
@@ -1102,20 +1096,32 @@ export default function MigrationWizard() {
         ? "Potential Fit: Spring web dependencies detected but explicit endpoints not fully mapped."
         : "Low Match: No REST controllers or Spring web dependencies detected.";
 
-    // ── Selenium confidence ──
-    let seleniumConf = 3;
+    // ── Selenium confidence (primary UI testing tool) ──
+    // Selenium is the standard browser-based UI tool for this pipeline: it drives a
+    // real browser, navigates every page and captures screenshots + video for the
+    // report. It gets the UI-detection confidence Playwright used to have.
+    let seleniumConf = 5;
     if (hasUI) {
-      seleniumConf = 32;
-      if (hasJspFiles || hasWebXml) seleniumConf += 12;
-      if (!hasThymeleaf && !hasHtmlTemplates) seleniumConf += 6;
-    } else if (hasJsp) {
-      seleniumConf = 22;
+      seleniumConf = 72;
+      if (hasThymeleaf || hasHtmlTemplates) seleniumConf += 10;
+      if (hasVelocityUI) seleniumConf += 10;
+      if (hasStaticAssets) seleniumConf += 6;
+      if (hasJspFiles || hasWebXml) seleniumConf += 4;
+    } else if (hasSrcMain && hasJsp) {
+      seleniumConf = 38;
+    } else if (hasSrcMain) {
+      seleniumConf = 12;
     }
-    seleniumConf = Math.min(seleniumConf, 55);
+    seleniumConf = Math.min(seleniumConf, 97);
 
-    const seleniumReason = seleniumConf >= 30
-      ? "Legacy UI detected — Selenium can test it, but Playwright is preferred for modern stacks."
-      : "Not Recommended: No significant UI layer detected for browser-based testing.";
+    const seleniumTag = seleniumConf >= 70 ? "Highly Recommended"
+      : seleniumConf >= 35 ? "Potential Fit"
+      : "Not Detected";
+    const seleniumReason = seleniumConf >= 70
+      ? `Highly Recommended: Detected ${[hasThymeleaf && "Thymeleaf templates", hasJspFiles && "JSP pages", hasHtmlTemplates && "HTML templates", hasVelocityUI && "Velocity templates", hasStaticAssets && "static assets"].filter(Boolean).join(", ") || "UI assets"} in project.`
+      : seleniumConf >= 35
+        ? "Potential Fit: Some web resources found but no strong UI framework detected."
+        : "Not Detected: No web UI assets or templating engine found in this project.";
 
     // ── MockMvc confidence ──
     let mockMvcConf = 3;
@@ -1166,26 +1172,28 @@ export default function MigrationWizard() {
           : "Not Applicable: No REST API layer or OpenAPI specification detected.";
 
     // ── Active (enabled) state per tool, derived from repo detection ──
-    // Rules:
-    //  • No UI layer  → Playwright is inactive; every other (API/backend) tool is active.
-    //  • Has UI + the repo already ships unit tests → only Playwright (UI) + Rest Assured (API) are active.
+    // Rules (Selenium is the UI tool; Playwright is retired):
+    //  • Playwright  → always inactive/hidden (replaced by Selenium).
+    //  • No UI layer → Selenium is inactive; every other (API/backend) tool is active.
+    //  • Has UI + the repo already ships unit tests → only Selenium (UI) + Rest Assured (API) are active.
     //  • Has UI + no unit tests → all tools are active.
     const toolActive = (id: string): boolean => {
-      if (!hasUI) return id !== "PLAYWRIGHT";
-      if (_hasTests) return id === "PLAYWRIGHT" || id === "REST_ASSURED";
+      if (id === "PLAYWRIGHT") return false;
+      if (!hasUI) return id !== "SELENIUM";
+      if (_hasTests) return id === "SELENIUM" || id === "REST_ASSURED";
       return true;
     };
 
     return [
       {
-        id: "PLAYWRIGHT",
-        name: "Playwright (UI)",
-        description: "Modern web testing for fast, reliable end-to-end tests across browsers.",
-        confidence: playwrightConf,
-        reason: playwrightReason,
+        id: "SELENIUM",
+        name: "Selenium (UI)",
+        description: "Browser-based end-to-end UI testing with per-page screenshots and video capture.",
+        confidence: seleniumConf,
+        reason: seleniumReason,
         color: "#22c55e",
-        tag: playwrightTag,
-        active: toolActive("PLAYWRIGHT"),
+        tag: seleniumTag,
+        active: toolActive("SELENIUM"),
       },
       {
         id: "REST_ASSURED",
@@ -1198,14 +1206,14 @@ export default function MigrationWizard() {
         active: toolActive("REST_ASSURED"),
       },
       {
-        id: "SELENIUM",
-        name: "Selenium (Legacy UI)",
-        description: "Widely used but may require significant configuration for your specific stack.",
-        confidence: seleniumConf,
-        reason: seleniumReason,
-        color: "#ef4444",
-        tag: "Legacy Support",
-        active: toolActive("SELENIUM"),
+        id: "PLAYWRIGHT",
+        name: "Playwright (UI)",
+        description: "Modern web testing for fast, reliable end-to-end tests across browsers.",
+        confidence: playwrightConf,
+        reason: playwrightReason,
+        color: "#22c55e",
+        tag: playwrightTag,
+        active: toolActive("PLAYWRIGHT"),
       },
       {
         id: "MOCK_MVC",
@@ -6613,14 +6621,15 @@ export default function MigrationWizard() {
               <span style={{ fontWeight: 800, fontSize: 15, color: "#0f172a" }}>Functional Tests</span>
             </div>
           <div>
-            <p style={{
+            {/* <p style={{
               fontSize: 13, color: "#64748b", marginBottom: 20,
               textAlign: "center", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 600,
             }}>
               Select Functional Testing Tool
-            </p>
+            </p> */}
 
-            {/* ── Validation Mode Selector ── */}
+            {/* ── Validation Mode Selector (hidden — always External) ── */}
+            {false && (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               gap: 8, marginBottom: 22,
@@ -6661,7 +6670,8 @@ export default function MigrationWizard() {
                 );
               })}
             </div>
-            {functionalTestExecutionMode === "external" && (
+            )}
+            {false && functionalTestExecutionMode === "external" && (
               <div style={{
                 background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8,
                 padding: "10px 14px", marginBottom: 18,

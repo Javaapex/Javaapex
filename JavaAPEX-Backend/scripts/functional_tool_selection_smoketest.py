@@ -5,6 +5,10 @@ single tool, a comma-separated string, or a list (any mix), filters to known
 tools, de-dupes, preserves order, and treats ``None``/``""``/``"auto"``/unknown
 as "use the auto recommendation" (empty list). This backs the Strategy page's
 ability to validate with MULTIPLE recommended tools at once.
+
+NOTE: ``PLAYWRIGHT`` has been RETIRED from ``KNOWN_FUNCTIONAL_TOOLS`` (the
+product now uses Selenium for UI testing), so it must be filtered out exactly
+like any other unknown token — several cases below pin that behaviour.
 """
 import importlib.util
 import sys
@@ -37,24 +41,37 @@ def main() -> int:
         ("auto", []),
         ("AUTO", []),
         ("BOGUS", []),
-        ("PLAYWRIGHT", ["PLAYWRIGHT"]),
-        ("playwright", ["PLAYWRIGHT"]),
-        ("  playwright  ", ["PLAYWRIGHT"]),
-        ("PLAYWRIGHT,REST_ASSURED", ["PLAYWRIGHT", "REST_ASSURED"]),
-        ("PLAYWRIGHT, REST_ASSURED", ["PLAYWRIGHT", "REST_ASSURED"]),
-        ("PLAYWRIGHT;MOCK_MVC", ["PLAYWRIGHT", "MOCK_MVC"]),
-        (["PLAYWRIGHT", "REST_ASSURED"], ["PLAYWRIGHT", "REST_ASSURED"]),
-        (["playwright", "auto", "BOGUS"], ["PLAYWRIGHT"]),
-        (["PLAYWRIGHT,MOCK_MVC", "SELENIUM"], ["PLAYWRIGHT", "MOCK_MVC", "SELENIUM"]),
-        ("PLAYWRIGHT,PLAYWRIGHT", ["PLAYWRIGHT"]),
-        (["PLAYWRIGHT", "PLAYWRIGHT"], ["PLAYWRIGHT"]),
+        # PLAYWRIGHT is retired → treated like any unknown token (filtered out).
+        ("PLAYWRIGHT", []),
+        ("playwright", []),
+        # Single known tool, case/whitespace-insensitive.
+        ("SELENIUM", ["SELENIUM"]),
+        ("selenium", ["SELENIUM"]),
+        ("  selenium  ", ["SELENIUM"]),
+        # Comma / space / semicolon separated strings of known tools.
+        ("SELENIUM,REST_ASSURED", ["SELENIUM", "REST_ASSURED"]),
+        ("SELENIUM, REST_ASSURED", ["SELENIUM", "REST_ASSURED"]),
+        ("SELENIUM;MOCK_MVC", ["SELENIUM", "MOCK_MVC"]),
+        # List inputs, order preserved.
+        (["SELENIUM", "REST_ASSURED"], ["SELENIUM", "REST_ASSURED"]),
+        (["selenium", "auto", "BOGUS"], ["SELENIUM"]),
+        # A list of only unknown/sentinel tokens → empty (use auto recommendation).
+        (["PLAYWRIGHT", "auto", "BOGUS"], []),
+        # Nested comma string inside a list element is still split.
+        (["SELENIUM,MOCK_MVC", "REST_ASSURED"], ["SELENIUM", "MOCK_MVC", "REST_ASSURED"]),
+        # De-duplication (string and list forms).
+        ("SELENIUM,SELENIUM", ["SELENIUM"]),
+        (["SELENIUM", "SELENIUM"], ["SELENIUM"]),
+        # All known tools, order preserved.
         (
-            ["PLAYWRIGHT", "REST_ASSURED", "MOCK_MVC", "SELENIUM", "SCHEMATHESIS"],
-            ["PLAYWRIGHT", "REST_ASSURED", "MOCK_MVC", "SELENIUM", "SCHEMATHESIS"],
+            ["REST_ASSURED", "MOCK_MVC", "SELENIUM", "SCHEMATHESIS"],
+            ["REST_ASSURED", "MOCK_MVC", "SELENIUM", "SCHEMATHESIS"],
         ),
+        # PLAYWRIGHT mixed with known tools → dropped, known ones kept in order.
+        (["SELENIUM", "PLAYWRIGHT", "REST_ASSURED"], ["SELENIUM", "REST_ASSURED"]),
         ((  # tuple input
-            "REST_ASSURED", "PLAYWRIGHT"
-        ), ["REST_ASSURED", "PLAYWRIGHT"]),
+            "REST_ASSURED", "SELENIUM"
+        ), ["REST_ASSURED", "SELENIUM"]),
     ]
 
     ok = True
